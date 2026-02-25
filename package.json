@@ -1,0 +1,27 @@
+{
+  "name": "figma-html-importer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:code\" \"npm run dev:ui\"",
+    "dev:code": "node build.mjs --watch",
+    "dev:ui": "vite build --watch",
+    "build": "npm run build:code && npm run build:ui",
+    "build:code": "node build.mjs",
+    "build:ui": "vite build"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.104.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.1.2",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}

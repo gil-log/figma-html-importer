@@ -1,0 +1,222 @@
+/* ── 리셋 ──────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  color: var(--figma-color-text, #1a1a1a);
+  background: var(--figma-color-bg, #ffffff);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── 레이아웃 ──────────────────────────────────────── */
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 12px;
+  gap: 8px;
+  overflow: hidden;
+}
+
+/* ── 헤더 ──────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--figma-color-border, #e5e5e5);
+  color: var(--figma-color-text, #1a1a1a);
+}
+
+.header-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ── 툴바 ──────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.label {
+  font-size: 11px;
+  color: var(--figma-color-text-secondary, #666);
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.select {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--figma-color-border, #e0e0e0);
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--figma-color-bg, #fff);
+  color: var(--figma-color-text, #1a1a1a);
+  outline: none;
+  cursor: pointer;
+}
+
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 텍스트 영역 ────────────────────────────────────── */
+.textarea-wrap {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  padding: 10px;
+  border: 1px solid var(--figma-color-border, #e0e0e0);
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  line-height: 1.6;
+  background: var(--figma-color-bg-secondary, #f8f8f8);
+  color: var(--figma-color-text, #1a1a1a);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.textarea:focus {
+  border-color: var(--figma-color-border-selected, #0d99ff);
+}
+
+.textarea:disabled {
+  opacity: 0.6;
+}
+
+.textarea::placeholder {
+  color: var(--figma-color-text-tertiary, #aaa);
+  line-height: 1.8;
+}
+
+.clear-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: var(--figma-color-bg-tertiary, #e8e8e8);
+  color: var(--figma-color-text-secondary, #666);
+  border-radius: 50%;
+  font-size: 9px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.clear-btn:hover {
+  background: var(--figma-color-bg-danger-tertiary, #ffdddd);
+  color: #e53e3e;
+}
+
+/* ── 상태 표시 ──────────────────────────────────────── */
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--figma-color-bg-brand-tertiary, #e8f4ff);
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--figma-color-text-brand, #0d99ff);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(13, 153, 255, 0.25);
+  border-top-color: #0d99ff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.status-text {
+  font-weight: 500;
+}
+
+/* ── 에러 / 성공 ─────────────────────────────────────── */
+.error-box {
+  padding: 8px 10px;
+  background: #fff0f0;
+  border: 1px solid #fca5a5;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #dc2626;
+  line-height: 1.5;
+}
+
+.success-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.result-detail {
+  font-weight: 400;
+  color: #4ade80;
+  font-size: 10px;
+}
+
+/* ── 가져오기 버튼 ───────────────────────────────────── */
+.import-btn {
+  padding: 9px 16px;
+  background: #0d99ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  letter-spacing: 0.01em;
+}
+
+.import-btn:hover:not(.disabled) {
+  background: #0088ee;
+}
+
+.import-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── 힌트 ───────────────────────────────────────────── */
+.hint {
+  font-size: 10px;
+  color: var(--figma-color-text-tertiary, #aaa);
+  line-height: 1.5;
+  padding-bottom: 2px;
+}
