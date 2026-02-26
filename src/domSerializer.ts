@@ -20,9 +20,6 @@ const INLINE_TEXT_TAGS = new Set([
   'time', 'u', 's', 'del', 'ins',
 ]);
 
-// position:fixed 요소는 viewport 기준이라 부모 rect 무시 → 스킵
-const SKIP_POSITIONS = new Set(['fixed']);
-
 function pf(val: string): number {
   const n = parseFloat(val);
   return isNaN(n) ? 0 : n;
@@ -183,16 +180,27 @@ export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): 
   const cs = window.getComputedStyle(el);
   if (cs.display === 'none') return null;
   if (cs.visibility === 'hidden') return null;
-  // position:fixed 요소는 viewport 기준 좌표 → 부모 기준 위치가 어긋남
-  // 단, 루트 요소(container)는 예외
-  if (!isRoot && SKIP_POSITIONS.has(cs.position)) return null;
+  // position:fixed 요소 처리:
+  // viewport 기준 좌표라 부모 기준 위치가 어긋나므로
+  // 일시적으로 absolute로 변경하여 부모 기준 좌표를 얻는다.
+  // (모바일 UI의 fixed 하단 바 등을 올바르게 포함하기 위해)
+  let fixedConverted = false;
+  if (!isRoot && cs.position === 'fixed') {
+    const htmlEl = el as HTMLElement;
+    htmlEl.style.position = 'absolute';
+    fixedConverted = true;
+  }
 
   const rect = el.getBoundingClientRect();
   // 크기가 0이면 렌더링 안 된 요소
-  if (rect.width < 1 || rect.height < 1) return null;
+  if (rect.width < 1 || rect.height < 1) {
+    if (fixedConverted) (el as HTMLElement).style.position = 'fixed';
+    return null;
+  }
 
   // SVG: outerHTML을 직렬화하여 Figma에서 createNodeFromSvg로 재현
   if (tag === 'svg') {
+    if (fixedConverted) (el as HTMLElement).style.position = 'fixed';
     return {
       tagName: 'svg',
       svgHtml: serializeSvg(el as SVGElement, cs),
@@ -375,6 +383,9 @@ export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): 
       if (phColor && phColor !== 'transparent') nodeStyle.color = phColor;
     } catch { /* ::placeholder not supported */ }
   }
+
+  // fixed → absolute 변환을 했으면 원래대로 복원
+  if (fixedConverted) (el as HTMLElement).style.position = 'fixed';
 
   return {
     tagName: tag,

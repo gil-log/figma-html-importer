@@ -457,6 +457,12 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       if (!isNaN(ls) && style.letterSpacing !== 'normal' && style.letterSpacing !== '0px') {
         t.letterSpacing = { value: ls, unit: 'PIXELS' };
       }
+      // text-decoration: underline / line-through
+      if (style.textDecoration.includes('underline')) {
+        t.textDecoration = 'UNDERLINE';
+      } else if (style.textDecoration.includes('line-through')) {
+        t.textDecoration = 'STRIKETHROUGH';
+      }
       if (fixedWidth > 0) {
         // 블록 요소: 고정 폭 + HEIGHT 자동 → text-align(center/right 등) 동작
         t.textAutoResize = 'HEIGHT';
