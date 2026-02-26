@@ -410,19 +410,54 @@ export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): 
  *   → [{ text:"텍스트", bold:false }, { text:"볼드", bold:true }, { text:"나머지", bold:false }]
  */
 function extractTextSegments(el: Element): TextSegment[] {
+  const parentColor = normalizeCssColor(window.getComputedStyle(el).color);
+  // el.textContent.trim()과 정확히 일치하는 세그먼트 배열을 생성한다.
+  // trim된 전체 텍스트를 기준으로 각 세그먼트의 위치를 매핑해야
+  // code.ts의 setRangeFills/setRangeFontName offset이 정확하다.
+  const fullText = (el.textContent || '').trim();
+  if (!fullText) return [];
+
   const segments: TextSegment[] = [];
+  let cursor = 0; // fullText 내 현재 위치
+
   for (const node of Array.from(el.childNodes)) {
+    let rawText = '';
+    let bold: boolean | undefined;
+    let color: string | undefined;
+
     if (node.nodeType === Node.TEXT_NODE) {
-      const t = node.textContent || '';
-      if (t) segments.push({ text: t });
+      rawText = node.textContent || '';
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const childEl = node as Element;
       const childCs = window.getComputedStyle(childEl);
       const isBold = parseInt(childCs.fontWeight) >= 700;
-      const childText = childEl.textContent || '';
-      if (childText) segments.push({ text: childText, bold: isBold || undefined });
+      const childColor = normalizeCssColor(childCs.color);
+      rawText = childEl.textContent || '';
+      bold = isBold || undefined;
+      color = childColor && childColor !== parentColor ? childColor : undefined;
+    } else {
+      continue;
+    }
+
+    if (!rawText) continue;
+
+    // rawText에서 fullText[cursor..]에 매칭되는 부분만 추출
+    // (앞뒤 공백, 줄바꿈 등이 trim으로 사라진 경우 보정)
+    for (let i = 0; i < rawText.length && cursor < fullText.length; i++) {
+      const ch = rawText[i];
+      if (ch === fullText[cursor]) {
+        // 이 문자는 fullText에 존재 → 현재 세그먼트에 추가
+        if (segments.length === 0 || segments[segments.length - 1].bold !== bold || segments[segments.length - 1].color !== color) {
+          segments.push({ text: ch, bold, color });
+        } else {
+          segments[segments.length - 1].text += ch;
+        }
+        cursor++;
+      }
+      // fullText에 없는 공백/줄바꿈은 건너뜀
     }
   }
+
   return segments;
 }
 

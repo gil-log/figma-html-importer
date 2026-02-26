@@ -51,6 +51,7 @@ export interface DomStyleData {
 export interface TextSegment {
   text: string;
   bold?: boolean;
+  color?: string;  // 부모와 다른 색상일 때 개별 색상
 }
 
 export interface DomNodeData {

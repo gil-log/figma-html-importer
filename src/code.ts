@@ -476,15 +476,21 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       return t;
     };
 
-    // bold 세그먼트 적용 헬퍼
+    // bold/color 세그먼트 적용 헬퍼
     const applyBoldSegments = async (t: TextNode): Promise<void> => {
       if (!textSegments || textSegments.length === 0) return;
       let offset = 0;
       for (const seg of textSegments) {
         const len = seg.text.length;
-        if (seg.bold && len > 0 && offset + len <= t.characters.length) {
-          const boldFont = await loadBestFont(family, weightToFigmaStyle('700', isItalic));
-          t.setRangeFontName(offset, offset + len, boldFont);
+        if (len > 0 && offset + len <= t.characters.length) {
+          if (seg.bold) {
+            const boldFont = await loadBestFont(family, weightToFigmaStyle('700', isItalic));
+            t.setRangeFontName(offset, offset + len, boldFont);
+          }
+          if (seg.color) {
+            const segPaint = toSolidPaint(seg.color);
+            if (segPaint) t.setRangeFills(offset, offset + len, [segPaint]);
+          }
         }
         offset += len;
       }
