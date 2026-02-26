@@ -1,14 +1,14 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { serializeDom } from '../domSerializer';
-import type { MainToUIMessage } from '../types';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {serializeDom} from '../domSerializer';
+import type {DomNodeData, MainToUIMessage} from '../types';
 
 const WIDTH_OPTIONS = [
-  { label: '375px — Mobile', value: 375 },
-  { label: '768px — Tablet', value: 768 },
-  { label: '1440px — Desktop', value: 1440 },
-  { label: '1920px — Wide', value: 1920 },
-  { label: '2880px — Multi-screen', value: 2880 },
-  { label: '3840px — Extra Wide', value: 3840 },
+  {label: '375px — Mobile', value: 375},
+  {label: '768px — Tablet', value: 768},
+  {label: '1440px — Desktop', value: 1440},
+  {label: '1920px — Wide', value: 1920},
+  {label: '2880px — Multi-screen', value: 2880},
+  {label: '3840px — Extra Wide', value: 3840},
 ];
 
 type Status = 'idle' | 'rendering' | 'parsing' | 'building' | 'done' | 'error';
@@ -37,7 +37,7 @@ export default function App() {
       if (!msg) return;
       if (msg.type === 'import-done') {
         setStatus('done');
-        setResult({ frameCount: msg.frameCount, textCount: msg.textCount });
+        setResult({frameCount: msg.frameCount, textCount: msg.textCount});
       } else if (msg.type === 'import-error') {
         setStatus('error');
         setError(msg.error);
@@ -58,6 +58,11 @@ export default function App() {
     if (html.includes('cdn.tailwindcss.com') || html.includes('tailwindcss')) {
       await ensureTailwind();
     }
+
+    // ── 1-a. 인라인 <script> 주입 (tailwind.config 등) ──────
+    // CDN이 먼저 로드되어 window.tailwind가 생성된 후
+    // tailwind.config = {...} 가 실행되어야 커스텀 색상이 동작한다.
+    const injectedScripts = injectInlineScripts(html);
 
     // ── 1-b. <head> 내 <style> 태그를 document.head에 주입 ──
     // extractBodyContent는 <body> 내용만 가져오므로
@@ -100,12 +105,19 @@ export default function App() {
       const isRoot = root === container;
       const domData = serializeDom(root, rootRect, isRoot);
       if (!domData) throw new Error(
-        `<${root.tagName.toLowerCase()}> 요소 크기가 0입니다.\n` +
-        'Tailwind CDN이 로드되지 않았거나 콘텐츠가 없는 요소입니다.'
+          `<${root.tagName.toLowerCase()}> 요소 크기가 0입니다.\n` +
+          'Tailwind CDN이 로드되지 않았거나 콘텐츠가 없는 요소입니다.'
       );
 
+      // ── 5. body/html 배경을 루트 노드에 적용 ─────────────
+      // body { background: ... } CSS는 document.body에 적용되지만
+      // 직렬화는 컨테이너 자식부터 시작하므로 body 배경이 누락된다.
+      // CSS background는 상속되지 않으므로 명시적으로 복사해야 한다.
+      // html 배경도 동일하게 처리 (body 배경 없으면 html 배경을 확인).
+      applyDocumentBackground(domData);
+
       setStatus('building');
-      parent.postMessage({ pluginMessage: { type: 'import-dom', data: domData } }, '*');
+      parent.postMessage({pluginMessage: {type: 'import-dom', data: domData}}, '*');
 
     } catch (e: any) {
       setStatus('error');
@@ -118,6 +130,10 @@ export default function App() {
       // 주입했던 <style> 제거
       if (injectedStyle && document.head.contains(injectedStyle)) {
         document.head.removeChild(injectedStyle);
+      }
+      // 주입했던 <script> 제거
+      for (const s of injectedScripts) {
+        if (document.head.contains(s)) document.head.removeChild(s);
       }
       // 렌더 컨테이너 제거
       if (containerRef.current) {
@@ -138,88 +154,89 @@ export default function App() {
   const canImport = !isImporting && html.trim().length > 0;
 
   return (
-    <div className="root">
-      {/* 헤더 */}
-      <div className="header">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <polyline points="16 18 22 12 16 6" />
-          <polyline points="8 6 2 12 8 18" />
-        </svg>
-        <span className="header-title">HTML → Figma</span>
-      </div>
+      <div className="root">
+        {/* 헤더 */}
+        <div className="header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+          <span className="header-title">HTML → Figma</span>
+        </div>
 
-      {/* 렌더 너비 선택 */}
-      <div className="toolbar">
-        <span className="label">렌더 너비</span>
-        <select
-          className="select"
-          value={renderWidth}
-          onChange={(e) => setRenderWidth(Number(e.target.value))}
-          disabled={isImporting}
-        >
-          {WIDTH_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      </div>
+        {/* 렌더 너비 선택 */}
+        <div className="toolbar">
+          <span className="label">렌더 너비</span>
+          <select
+              className="select"
+              value={renderWidth}
+              onChange={(e) => setRenderWidth(Number(e.target.value))}
+              disabled={isImporting}
+          >
+            {WIDTH_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
 
-      {/* HTML 입력 */}
-      <div className="textarea-wrap">
+        {/* HTML 입력 */}
+        <div className="textarea-wrap">
         <textarea
-          className="textarea"
-          placeholder={`Claude Code로 생성한 HTML을 여기에 붙여넣으세요.\n\n전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.`}
-          value={html}
-          onChange={(e) => setHtml(e.target.value)}
-          disabled={isImporting}
-          spellCheck={false}
+            className="textarea"
+            placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.`}
+            value={html}
+            onChange={(e) => setHtml(e.target.value)}
+            disabled={isImporting}
+            spellCheck={false}
         />
-        {html && !isImporting && (
-          <button className="clear-btn" onClick={handleReset} title="지우기">
-            ✕
-          </button>
+          {html && !isImporting && (
+              <button className="clear-btn" onClick={handleReset} title="지우기">
+                ✕
+              </button>
+          )}
+        </div>
+
+        {/* 진행 상태 */}
+        {isImporting && (
+            <div className="status-row">
+              <div className="spinner"/>
+              <span className="status-text">{STATUS_LABEL[status]}</span>
+            </div>
         )}
-      </div>
 
-      {/* 진행 상태 */}
-      {isImporting && (
-        <div className="status-row">
-          <div className="spinner" />
-          <span className="status-text">{STATUS_LABEL[status]}</span>
-        </div>
-      )}
+        {/* 에러 */}
+        {status === 'error' && (
+            <div className="error-box">
+              <strong>오류:</strong> {error}
+            </div>
+        )}
 
-      {/* 에러 */}
-      {status === 'error' && (
-        <div className="error-box">
-          <strong>오류:</strong> {error}
-        </div>
-      )}
-
-      {/* 완료 */}
-      {status === 'done' && result && (
-        <div className="success-box">
-          <span>✓ 완료</span>
-          <span className="result-detail">
+        {/* 완료 */}
+        {status === 'done' && result && (
+            <div className="success-box">
+              <span>✓ 완료</span>
+              <span className="result-detail">
             Frame {result.frameCount}개 · Text {result.textCount}개
           </span>
+            </div>
+        )}
+
+        {/* 가져오기 버튼 */}
+        <button
+            className={`import-btn ${!canImport ? 'disabled' : ''}`}
+            onClick={handleImport}
+            disabled={!canImport}
+        >
+          {isImporting ? '가져오는 중...' : 'Figma에 가져오기'}
+        </button>
+
+        {/* 설명 */}
+        <div className="hint">
+          Chrome에서 렌더링한 것과 동일하게 Figma 레이어로 변환합니다.<br/>
+          외부 폰트/이미지는 Inter 폰트 및 회색 placeholder로 대체됩니다.
         </div>
-      )}
-
-      {/* 가져오기 버튼 */}
-      <button
-        className={`import-btn ${!canImport ? 'disabled' : ''}`}
-        onClick={handleImport}
-        disabled={!canImport}
-      >
-        {isImporting ? '가져오는 중...' : 'Figma에 가져오기'}
-      </button>
-
-      {/* 설명 */}
-      <div className="hint">
-        Chrome에서 렌더링한 것과 동일하게 Figma 레이어로 변환합니다.<br />
-        외부 폰트/이미지는 Inter 폰트 및 회색 placeholder로 대체됩니다.
       </div>
-    </div>
   );
 }
 
@@ -228,7 +245,9 @@ export default function App() {
 function waitFrames(n: number): Promise<void> {
   return new Promise<void>((res) => {
     let count = 0;
-    const tick = () => { if (++count >= n) res(); else requestAnimationFrame(tick); };
+    const tick = () => {
+      if (++count >= n) res(); else requestAnimationFrame(tick);
+    };
     requestAnimationFrame(tick);
   });
 }
@@ -244,7 +263,10 @@ async function ensureTailwind(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const s = document.createElement('script');
     s.src = 'https://cdn.tailwindcss.com';
-    s.onload = () => { (window as any).__twLoaded = true; resolve(); };
+    s.onload = () => {
+      (window as any).__twLoaded = true;
+      resolve();
+    };
     s.onerror = () => reject(new Error('Tailwind CDN 로드 실패. 네트워크를 확인하세요.'));
     document.head.appendChild(s);
   });
@@ -280,13 +302,38 @@ function injectHeadStyles(html: string): HTMLStyleElement | null {
   const matches = html.match(/<style[^>]*>([\s\S]*?)<\/style>/gi);
   if (!matches || matches.length === 0) return null;
   const combined = matches
-    .map((s) => { const m = s.match(/<style[^>]*>([\s\S]*?)<\/style>/i); return m ? m[1] : ''; })
-    .join('\n');
+  .map((s) => {
+    const m = s.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+    return m ? m[1] : '';
+  })
+  .join('\n');
   if (!combined.trim()) return null;
   const el = document.createElement('style');
   el.textContent = combined;
   document.head.appendChild(el);
   return el;
+}
+
+/**
+ * HTML의 인라인 <script> 태그(src 없는 것)를 document.head에 주입.
+ * tailwind.config = {...} 같은 설정 스크립트가 CDN보다 먼저 실행되어야
+ * Tailwind 커스텀 색상(bg-bg 등)이 올바르게 동작한다.
+ * 반환된 element 배열을 렌더링 후 반드시 제거할 것.
+ */
+function injectInlineScripts(html: string): HTMLScriptElement[] {
+  const injected: HTMLScriptElement[] = [];
+  // src 속성이 없는 인라인 <script> 태그만 매칭
+  const regex = /<script(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    const content = match[1].trim();
+    if (!content) continue;
+    const el = document.createElement('script');
+    el.textContent = content;
+    document.head.appendChild(el);
+    injected.push(el);
+  }
+  return injected;
 }
 
 /**
@@ -346,4 +393,39 @@ function findRenderRoot(container: HTMLElement): Element {
   // 여러 개이거나 0개 → container 자체를 루트로 사용
   // (투명 배경, 모든 콘텐츠 자식이 포함됨)
   return container;
+}
+
+/**
+ * body/html에 설정된 배경을 직렬화된 루트 노드에 적용.
+ * CSS `body { background: ... }` 규칙은 document.body에 적용되지만
+ * 직렬화는 컨테이너 자식부터 시작하므로 body/html 배경이 누락된다.
+ * CSS background 속성은 상속되지 않으므로 명시적으로 복사해야 한다.
+ */
+function applyDocumentBackground(domData: DomNodeData): void {
+  const isClear = (c: string) =>
+      !c || c === 'transparent' || c === 'rgba(0, 0, 0, 0)';
+
+  // body → html 순으로 탐색하여 배경색 찾기
+  const sources = [
+    window.getComputedStyle(document.body),
+    window.getComputedStyle(document.documentElement),
+  ];
+
+  if (isClear(domData.style.backgroundColor)) {
+    for (const cs of sources) {
+      if (!isClear(cs.backgroundColor)) {
+        domData.style.backgroundColor = cs.backgroundColor;
+        break;
+      }
+    }
+  }
+
+  if (!domData.style.backgroundImage || domData.style.backgroundImage === 'none') {
+    for (const cs of sources) {
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') {
+        domData.style.backgroundImage = cs.backgroundImage;
+        break;
+      }
+    }
+  }
 }

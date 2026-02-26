@@ -17,16 +17,55 @@ interface ParsedColor {
 
 function parseColor(css: string): ParsedColor | null {
   if (!css || css === 'transparent' || css === 'none') return null;
-  const m = css.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/);
-  if (!m) return null;
-  return {
-    rgb: {
-      r: parseFloat(m[1]) / 255,
-      g: parseFloat(m[2]) / 255,
-      b: parseFloat(m[3]) / 255,
-    },
-    a: m[4] !== undefined ? parseFloat(m[4]) : 1,
-  };
+
+  // Legacy: rgb(243, 243, 243) / rgba(243, 243, 243, 0.5)
+  let m = css.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/);
+  if (m) {
+    return {
+      rgb: {
+        r: parseFloat(m[1]) / 255,
+        g: parseFloat(m[2]) / 255,
+        b: parseFloat(m[3]) / 255,
+      },
+      a: m[4] !== undefined ? parseFloat(m[4]) : 1,
+    };
+  }
+
+  // Modern CSS Color Level 4: rgb(243 243 243) / rgb(243 243 243 / 0.5)
+  m = css.match(/^rgba?\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)$/);
+  if (m) {
+    let a = 1;
+    if (m[4] !== undefined) {
+      a = m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+    }
+    return {
+      rgb: {
+        r: parseFloat(m[1]) / 255,
+        g: parseFloat(m[2]) / 255,
+        b: parseFloat(m[3]) / 255,
+      },
+      a,
+    };
+  }
+
+  // color(srgb 0.953 0.953 0.953) / color(srgb 0.953 0.953 0.953 / 0.5)
+  m = css.match(/^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)$/);
+  if (m) {
+    let a = 1;
+    if (m[4] !== undefined) {
+      a = m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+    }
+    return {
+      rgb: {
+        r: parseFloat(m[1]),  // sRGB: 이미 0~1 범위
+        g: parseFloat(m[2]),
+        b: parseFloat(m[3]),
+      },
+      a,
+    };
+  }
+
+  return null;
 }
 
 function isTransparent(css: string): boolean {
@@ -66,6 +105,8 @@ const FONT_MAP: Record<string, string> = {
   'fira code': 'Fira Code',
   'jetbrains mono': 'JetBrains Mono',
   // 한국어 폰트
+  'pretendard': 'Pretendard',
+  'pretendard variable': 'Pretendard',
   'noto sans kr': 'Noto Sans KR',
   'noto sans cjk kr': 'Noto Sans KR',
   'apple sd gothic neo': 'Noto Sans KR',
@@ -110,13 +151,46 @@ function weightToFigmaStyle(weight: string, italic: boolean): string {
 }
 
 // Figma에 없는 폰트 스타일은 가까운 것으로 폴백
+// 한국어 폰트는 Noto Sans KR을 중간 폴백으로 시도
+const KOREAN_FAMILIES = new Set([
+  'Pretendard', 'Noto Sans KR', 'Apple SD Gothic Neo',
+  'Malgun Gothic', 'NanumGothic',
+]);
+
 async function loadBestFont(family: string, style: string): Promise<FontName> {
-  const candidates = [
+  const candidates: FontName[] = [
     { family, style },
+  ];
+
+  // Figma 폰트 스타일 네이밍은 'SemiBold' / 'Semi Bold' 두 가지 관례가 혼재
+  // → 두 변형 모두 시도하여 폰트 로딩 실패 방지
+  const spaced = style
+    .replace('SemiBold', 'Semi Bold')
+    .replace('ExtraBold', 'Extra Bold')
+    .replace('ExtraLight', 'Extra Light');
+  if (spaced !== style) candidates.push({ family, style: spaced });
+  const compact = style
+    .replace('Semi Bold', 'SemiBold')
+    .replace('Extra Bold', 'ExtraBold')
+    .replace('Extra Light', 'ExtraLight');
+  if (compact !== style) candidates.push({ family, style: compact });
+
+  candidates.push(
     { family, style: style.replace(' Italic', '') },
     { family, style: 'Regular' },
-    { family: 'Inter', style: 'Regular' },
-  ];
+  );
+
+  // 한국어 폰트 → Noto Sans KR 폴백 (Inter보다 한글 표시가 나음)
+  if (family !== 'Noto Sans KR' && KOREAN_FAMILIES.has(family)) {
+    candidates.push(
+      { family: 'Noto Sans KR', style },
+      { family: 'Noto Sans KR', style: style.replace(' Italic', '') },
+      { family: 'Noto Sans KR', style: 'Regular' },
+    );
+  }
+
+  candidates.push({ family: 'Inter', style: 'Regular' });
+
   for (const fn of candidates) {
     try {
       await figma.loadFontAsync(fn);
@@ -125,7 +199,6 @@ async function loadBestFont(family: string, style: string): Promise<FontName> {
       // 다음 후보 시도
     }
   }
-  // 이 지점에 도달하면 에러 (실제로는 Inter Regular가 항상 있어야 함)
   throw new Error('Cannot load any font');
 }
 
@@ -340,10 +413,9 @@ function applyFrameStyle(frame: FrameNode, s: DomStyleData): void {
   if (s.opacity < 1) frame.opacity = s.opacity;
   applyStrokes(frame, s);
   applyEffects(frame, s);
-  // clipsContent는 의도적으로 false:
-  // figma.createFrame() 기본값이 true이므로 명시적으로 끔.
-  // position:absolute 뱃지/도트가 부모 경계 밖에 위치해도 잘리지 않게 함.
-  frame.clipsContent = false;
+  // overflow:hidden → clipsContent=true (둥근 모서리 카드 등 콘텐츠 클리핑)
+  // 그 외 → false (position:absolute 뱃지/도트가 부모 경계 밖에 보이도록)
+  frame.clipsContent = s.overflow === 'hidden' || s.overflow === 'clip';
 }
 
 // ─── 재귀 노드 빌더 ───────────────────────────────────────────
@@ -352,7 +424,7 @@ let frameCount = 0;
 let textCount = 0;
 
 async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
-  const { rect, style, tagName, text, children, visible, imageUrl } = node;
+  const { rect, style, tagName, text, textSegments, children, visible, imageUrl } = node;
   const w = Math.max(rect.width, 1);
   const h = Math.max(rect.height, 1);
 
@@ -398,6 +470,20 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       return t;
     };
 
+    // bold 세그먼트 적용 헬퍼
+    const applyBoldSegments = async (t: TextNode): Promise<void> => {
+      if (!textSegments || textSegments.length === 0) return;
+      let offset = 0;
+      for (const seg of textSegments) {
+        const len = seg.text.length;
+        if (seg.bold && len > 0 && offset + len <= t.characters.length) {
+          const boldFont = await loadBestFont(family, weightToFigmaStyle('700', isItalic));
+          t.setRangeFontName(offset, offset + len, boldFont);
+        }
+        offset += len;
+      }
+    };
+
     // 배지/버튼: 테두리 또는 배경이 있으면 Frame으로 감싸 박스 스타일 재현
     const bw = Math.max(style.borderTopWidth, style.borderRightWidth,
       style.borderBottomWidth, style.borderLeftWidth);
@@ -405,9 +491,11 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     const hasBg = !isTransparent(style.backgroundColor) ||
       (style.backgroundImage !== '' && style.backgroundImage !== 'none');
 
+    // 한 줄 텍스트 판단: 높이가 폰트 크기의 3.5배 미만이면 줄바꿈 금지
+    // (text-base(16px) + h-[50px] 버튼 등이 올바르게 단일 행으로 처리됨)
+    const isSingleLine = h < style.fontSize * 3.5;
+
     // HEIGHT(고정 폭) vs WIDTH_AND_HEIGHT(자동 폭) 판단 헬퍼
-    // 폰트 메트릭 차이로 인한 불필요한 줄바꿈 방지를 위해
-    // 추정 최소폭의 1.5배 이상일 때만 HEIGHT 사용
     const calcFixedWidth = (containerW: number): number => {
       const estMin = style.fontSize * (text?.length ?? 1);
       return containerW > estMin * 1.5 ? containerW : 0;
@@ -420,11 +508,41 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       frame.x = rect.x;
       frame.y = rect.y;
       applyFrameStyle(frame, style);
-      // 배지/버튼은 항상 고정폭 → text-align 동작 보장
-      const textAreaW = Math.max(w - style.paddingLeft - style.paddingRight, 10);
-      const t = makeText(style.paddingLeft, style.paddingTop, textAreaW);
+
+      if (isSingleLine) {
+        // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 절대 방지
+        const t = makeText(style.paddingLeft, style.paddingTop, 0);
+        await applyBoldSegments(t);
+        // 가로 정렬
+        const isFlex = style.display.includes('flex');
+        if (isFlex && style.justifyContent === 'center') {
+          t.x = Math.round((w - t.width) / 2);
+        } else if (style.textAlign === 'center') {
+          t.x = Math.round((w - t.width) / 2);
+        }
+        // 세로 정렬
+        if (isFlex && style.alignItems === 'center') {
+          t.y = Math.round((h - t.height) / 2);
+        } else if (tagName === 'button' || tagName === 'a') {
+          t.y = Math.round((h - t.height) / 2);
+        }
+        frame.appendChild(t);
+      } else {
+        // 여러 줄 가능: 고정 폭
+        const textAreaW = Math.max(w - style.paddingLeft - style.paddingRight, 10);
+        const t = makeText(style.paddingLeft, style.paddingTop, textAreaW);
+        await applyBoldSegments(t);
+        // 세로 정렬 (flex center 또는 button/a 태그)
+        const isFlex2 = style.display.includes('flex');
+        if (isFlex2 && style.alignItems === 'center') {
+          t.y = Math.round((h - t.height) / 2);
+        } else if (tagName === 'button' || tagName === 'a') {
+          t.y = Math.round((h - t.height) / 2);
+        }
+        frame.appendChild(t);
+      }
+
       if (!visible) frame.visible = false;
-      frame.appendChild(t);
       parent.appendChild(frame);
       frameCount++;
       textCount++;
@@ -435,9 +553,9 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     // center/right 정렬:
     // ① WIDTH_AND_HEIGHT 모드로 Figma 실제 폰트 폭을 얻어 줄바꿈 없이 렌더
     // ② DOM 중심점(center) 또는 DOM 오른쪽 끝(right)을 기준으로 x 재계산
-    //    → Chrome·Figma 폰트 메트릭 차이에 무관하게 정확한 정렬
     if (style.textAlign === 'center' || style.textAlign === 'right') {
-      const t = makeText(0, rect.y, 0); // WIDTH_AND_HEIGHT → Figma 폰트 기준 자동 폭
+      const t = makeText(0, rect.y, 0);
+      await applyBoldSegments(t);
       if (style.textAlign === 'center') {
         const domCenter = rect.x + rect.width / 2;
         t.x = Math.round(domCenter - t.width / 2);
@@ -450,10 +568,21 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       return;
     }
 
-    // left/start 정렬: DOM 위치 그대로, block이면 고정폭으로 줄바꿈 허용
+    // left/start 정렬: DOM 위치 그대로
+    if (isSingleLine) {
+      // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 방지
+      const t = makeText(rect.x, rect.y, 0);
+      await applyBoldSegments(t);
+      if (!visible) t.visible = false;
+      parent.appendChild(t);
+      textCount++;
+      return;
+    }
+
     const isBlockDisplay = /^(block|flex|grid|list-item|table)/.test(style.display);
     const fixedW = isBlockDisplay ? calcFixedWidth(w) : 0;
     const t = makeText(rect.x, rect.y, fixedW);
+    await applyBoldSegments(t);
     if (!visible) t.visible = false;
     parent.appendChild(t);
     textCount++;
@@ -512,9 +641,16 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   }
 
   // ── Frame (div, section, header, ... 모든 박스 요소) ────────
+  // 자식 extent가 반올림으로 부모를 초과할 수 있음 → clipsContent 시 잘림 방지
+  let frameW = w;
+  let frameH = h;
+  for (const child of children) {
+    frameH = Math.max(frameH, child.rect.y + child.rect.height);
+    frameW = Math.max(frameW, child.rect.x + child.rect.width);
+  }
+
   const frame = figma.createFrame();
-  frame.name = tagName;
-  frame.resize(w, h);
+  frame.resize(frameW, frameH);
   frame.x = rect.x;
   frame.y = rect.y;
 
@@ -531,6 +667,8 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
 
   if (!visible) frame.visible = false;
   parent.appendChild(frame);
+  frame.name = tagName;
+
   frameCount++;
 }
 

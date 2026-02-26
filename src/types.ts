@@ -47,13 +47,20 @@ export interface DomStyleData {
   position: string;
 }
 
+/** 인라인 혼합 콘텐츠의 스타일 세그먼트 (bold 등) */
+export interface TextSegment {
+  text: string;
+  bold?: boolean;
+}
+
 export interface DomNodeData {
   tagName: string;
-  text?: string;        // 텍스트 리프 노드의 텍스트 콘텐츠
-  imageUrl?: string;    // <img> src
-  svgHtml?: string;     // <svg> 직렬화 HTML (<use> 참조 인라인 처리 후)
+  text?: string;           // 텍스트 리프 노드의 텍스트 콘텐츠
+  textSegments?: TextSegment[];  // 인라인 혼합 콘텐츠의 볼드 세그먼트
+  imageUrl?: string;       // <img> src
+  svgHtml?: string;        // <svg> 직렬화 HTML (<use> 참조 인라인 처리 후)
   rect: {
-    x: number;         // 부모 기준 상대 좌표
+    x: number;            // 부모 기준 상대 좌표
     y: number;
     width: number;
     height: number;

@@ -40,6 +40,10 @@ dev-dist
 public/sw.js
 public/workbox-*.js
 
+# Claude Code
+.claude/
+CLAUDE.md
+
 # Misc
 .turbo
 .vercel

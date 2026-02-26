@@ -1,6 +1,6 @@
 {
   "name": "HTML to Figma Importer",
-  "id": "html-to-figma-importer",
+  "id": "1608690624536054548",
   "api": "1.0.0",
   "main": "dist/code.js",
   "ui": "dist/ui.html",
