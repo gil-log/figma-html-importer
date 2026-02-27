@@ -130,7 +130,12 @@ function extractPseudoElement(
 function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
   return {
     backgroundColor: normalizeCssColor(cs.backgroundColor),
-    backgroundImage: cs.backgroundImage || '',
+    backgroundImage: (() => {
+      // background-clip: text → 그라디언트가 텍스트 색상용이므로 배경에서 제외
+      const bgClip = (cs as any).webkitBackgroundClip || cs.backgroundClip;
+      if (bgClip === 'text') return '';
+      return cs.backgroundImage || '';
+    })(),
     color: normalizeCssColor(cs.color),
     fontSize: pf(cs.fontSize) || 14,
     fontWeight: cs.fontWeight,
