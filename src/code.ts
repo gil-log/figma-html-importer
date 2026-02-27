@@ -581,6 +581,21 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     }
 
     // left/start 정렬: DOM 위치 그대로
+    // block 요소에서 실제로 텍스트가 줄바꿈되는지 lineHeight로 판별
+    const isBlockDisplay = /^(block|flex|grid|list-item|table)/.test(style.display);
+    const lineH = parseFloat(style.lineHeight) || (style.fontSize * 1.4);
+    const textWraps = isBlockDisplay && h > lineH * 1.3;
+
+    if (textWraps) {
+      // 브라우저에서 텍스트가 줄바꿈됨 → 요소 폭을 고정폭으로 사용하여 줄바꿈 보존
+      const t = makeText(rect.x, rect.y, w);
+      await applyBoldSegments(t);
+      if (!visible) t.visible = false;
+      parent.appendChild(t);
+      textCount++;
+      return;
+    }
+
     if (isSingleLine) {
       // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 방지
       const t = makeText(rect.x, rect.y, 0);
@@ -591,7 +606,6 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       return;
     }
 
-    const isBlockDisplay = /^(block|flex|grid|list-item|table)/.test(style.display);
     const fixedW = isBlockDisplay ? calcFixedWidth(w) : 0;
     const t = makeText(rect.x, rect.y, fixedW);
     await applyBoldSegments(t);
