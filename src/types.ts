@@ -34,6 +34,8 @@ export interface DomStyleData {
   opacity: number;
   boxShadow: string;
   overflow: string;
+  overflowX: string;
+  overflowY: string;
 
   // 레이아웃
   display: string;

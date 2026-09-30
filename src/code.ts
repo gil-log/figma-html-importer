@@ -529,9 +529,9 @@ function applyFrameStyle(frame: FrameNode, s: DomStyleData, w: number, h: number
   applyCornerRadius(frame, s);
   if (s.opacity < 1) frame.opacity = s.opacity;
   applyStrokes(frame, s);
-  // overflow:hidden → clipsContent=true (둥근 모서리 카드 등 콘텐츠 클리핑)
-  // 그 외 → false (position:absolute 뱃지/도트가 부모 경계 밖에 보이도록)
-  frame.clipsContent = s.overflow === 'hidden' || s.overflow === 'clip';
+  // overflow 가 visible 이 아니면(hidden·clip·auto·scroll) 넘치는 자식을 자른다
+  // (둥근 모서리 카드, 가로 스크롤 칩·캐러셀). visible → 절대위치 뱃지/도트가 부모 경계 밖에 보인다
+  frame.clipsContent = [s.overflowX ?? s.overflow, s.overflowY ?? s.overflow].some((v) => v !== 'visible');
 }
 
 // ─── 텍스트 노드 ──────────────────────────────────────────────
@@ -778,18 +778,9 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   }
 
   // ── Frame (div, section, header, ... 모든 박스 요소) ────────
-  // 자식 extent가 반올림으로 부모를 초과할 수 있음 → clipsContent 시 잘림 방지
-  let frameW = w;
-  let frameH = h;
-  if (!node.collapsed) {
-    for (const child of children) {
-      frameH = Math.max(frameH, child.rect.y + child.rect.height);
-      frameW = Math.max(frameW, child.rect.x + child.rect.width);
-    }
-  }
-
+  // 크기는 요소 자신의 크기 그대로 둔다 (넘치는 자식 때문에 배경이 커지지 않게)
   const frame = figma.createFrame();
-  frame.resize(frameW, frameH);
+  frame.resize(w, h);
   frame.x = rect.x;
   frame.y = rect.y;
 
@@ -817,6 +808,22 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   frame.name = tagName;
 
   frameCount++;
+}
+
+/** 자식이 그려지는 오른쪽·아래 끝 (자르지 않는 프레임은 자손까지 따라간다) */
+function contentExtent(frame: FrameNode): { right: number; bottom: number } {
+  let right = 0;
+  let bottom = 0;
+  for (const c of frame.children) {
+    right = Math.max(right, c.x + c.width);
+    bottom = Math.max(bottom, c.y + c.height);
+    if (c.type === 'FRAME' && !c.clipsContent && c.children.length > 0) {
+      const inner = contentExtent(c);
+      right = Math.max(right, c.x + inner.right);
+      bottom = Math.max(bottom, c.y + inner.bottom);
+    }
+  }
+  return { right, bottom };
 }
 
 // ─── 메시지 핸들러 ────────────────────────────────────────────
@@ -854,6 +861,13 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
           await buildTree(child, rootFrame);
         } catch (err) {
           console.error('[html-importer] child error:', err);
+        }
+      }
+      // 페이지 밖으로 넘친 자식(절대위치 요소 등)까지 루트가 감싸도록 늘린다 (루트가 자르지 않을 때만)
+      if (!rootFrame.clipsContent) {
+        const { right, bottom } = contentExtent(rootFrame);
+        if (right > rootFrame.width || bottom > rootFrame.height) {
+          rootFrame.resizeWithoutConstraints(Math.max(right, rootFrame.width), Math.max(bottom, rootFrame.height));
         }
       }
       applyEffects(rootFrame, data.style);

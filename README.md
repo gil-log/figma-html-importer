@@ -34,7 +34,9 @@ text nodes, and vectors.
 - **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
   drop or inner shadow with offset, blur, spread, and color. Spread-only rings on transparent
   elements (Tailwind `ring-*`) become strokes.
-- **Opacity & overflow** — element opacity and `overflow: hidden` mapped to `clipsContent`.
+- **Opacity & overflow** — element opacity (including `opacity: 0`), and `overflow` other than
+  `visible` (hidden, clip, auto, scroll) on either axis mapped to `clipsContent`. Frames keep the
+  element's own size, so overflowing children never stretch a background.
 
 ### Typography
 

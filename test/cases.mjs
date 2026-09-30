@@ -449,6 +449,17 @@ export const cases = [
     },
   },
   {
+    id: 'root-expand',
+    title: '페이지 아래로 넘친 절대위치 요소까지 결과 프레임이 감싼다',
+    width: 375,
+    html: '<div style="height:100px">a</div><div style="position:absolute;top:150px;left:0;width:50px;height:50px;background:red"></div>',
+    check: ({ root }, t) => {
+      const red = solidFrame(root, [255, 0, 0]);
+      t.ok(red, 'red box');
+      t.ok(red && root.height >= red.ay + red.height - 0.5, `root height ${root.height}`);
+    },
+  },
+  {
     id: 'zero-size-wrapper',
     title: '크기가 0 인 래퍼 안의 요소도 들어간다',
     width: 375,

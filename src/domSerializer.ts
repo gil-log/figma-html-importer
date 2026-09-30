@@ -174,6 +174,8 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     opacity: cs.opacity === '' ? 1 : parseFloat(cs.opacity),
     boxShadow: cs.boxShadow,
     overflow: cs.overflow,
+    overflowX: cs.overflowX,
+    overflowY: cs.overflowY,
     display: cs.display,
     flexDirection: cs.flexDirection,
     alignItems: cs.alignItems,
