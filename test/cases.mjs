@@ -1431,4 +1431,16 @@ export const cases = [
       t.ok(!findText(root, 'hidden answer'), 'closed content hidden');
     },
   },
+  {
+    id: 'text-gradient-inline',
+    title: '문장 안의 그라디언트 글자(bg-clip-text span)는 그 구간이 그라디언트로 칠해진다',
+    width: 375,
+    html: '<div><h1 style="margin:0">Plain <span style="background:linear-gradient(90deg,red,blue);-webkit-background-clip:text;background-clip:text;color:transparent">Gradient</span></h1></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Plain Gradient');
+      if (!t.ok(n, `texts: ${JSON.stringify(texts(root).map((x) => x.characters))}`)) return;
+      const r = n.ranges.find((x) => x.kind === 'fills' && x.start === 6 && x.end === 14);
+      t.eq(r?.value?.[0]?.type, 'GRADIENT_LINEAR', 'gradient range');
+    },
+  },
 ];

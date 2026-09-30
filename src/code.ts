@@ -989,10 +989,20 @@ function toLetterSpacing(letterSpacing: string | undefined): LetterSpacing | nul
   return isNaN(v) || v === 0 ? null : { value: v, unit: 'PIXELS' };
 }
 
-/** 인라인 요소의 굵기·이탤릭·글꼴·크기·색·밑줄·대소문자 구간 적용 */
-async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
+interface DeferredFill {
+  start: number;
+  end: number;
+  image: string;
+}
+
+/**
+ * 인라인 요소의 굵기·이탤릭·글꼴·크기·색·밑줄·대소문자 구간 적용.
+ * 그라디언트 글자 구간은 텍스트 크기가 정해진 뒤에 칠해야 하므로 돌려준다.
+ */
+async function applySegments(t: TextNode, node: DomNodeData): Promise<DeferredFill[]> {
   const { style, textSegments } = node;
-  if (!textSegments) return;
+  const deferred: DeferredFill[] = [];
+  if (!textSegments) return deferred;
   const baseFont = t.fontName as FontName;
   let offset = 0;
   for (const seg of textSegments) {
@@ -1010,6 +1020,7 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
       const paint = toSolidPaint(seg.color);
       if (paint) t.setRangeFills(start, end, [paint]);
     }
+    if (seg.textFillImage) deferred.push({ start, end, image: seg.textFillImage });
     if (seg.textDecoration) t.setRangeTextDecoration(start, end, toTextDecoration(seg.textDecoration));
     // 밑줄 세부 속성은 밑줄·취소선이 있는 구간에만 둘 수 있다
     if (toTextDecoration(seg.textDecoration ?? style.textDecoration) !== 'NONE') {
@@ -1029,6 +1040,7 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
       t.setRangeLetterSpacing(start, end, toLetterSpacing(seg.letterSpacing) ?? { value: 0, unit: 'PIXELS' });
     }
   }
+  return deferred;
 }
 
 /**
@@ -1080,7 +1092,7 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number, layerEf
   if (textCase !== 'ORIGINAL') t.textCase = textCase;
   const align = toTextAlign(style.textAlign, style.direction);
   t.textAlignHorizontal = align;
-  await applySegments(t, node);
+  const deferredFills = await applySegments(t, node);
 
   const box = node.textBox ?? { x: 0, y: 0, width: rect.width, height: rect.height };
   const wrap = node.wrapBox ?? { x: box.x, width: box.width };
@@ -1102,11 +1114,16 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number, layerEf
   }
   t.y = oy + box.y + box.height / 2 - t.height / 2;
 
-  // background-clip:text 그라디언트 글자 → 텍스트 fill 을 그라디언트로
+  // background-clip:text 그라디언트 글자 → 텍스트 fill 을 그라디언트로 (구간이면 그 구간만)
+  const clipPaints = (image: string) =>
+    backgroundPaints({ ...style, backgroundColor: 'transparent', backgroundImage: image }, t.width, t.height);
   if (style.textFillImage && !textPaint) {
-    const paints = backgroundPaints({ ...style, backgroundColor: 'transparent', backgroundImage: style.textFillImage },
-      t.width, t.height);
+    const paints = clipPaints(style.textFillImage);
     if (paints.length) t.fills = paints;
+  }
+  for (const f of deferredFills) {
+    const paints = clipPaints(f.image);
+    if (paints.length) t.setRangeFills(f.start, f.end, paints);
   }
   const effects: Effect[] = parseShadows(style.textShadow).map((sh) => ({
     type: 'DROP_SHADOW', color: { ...sh.color.rgb, a: sh.color.a }, offset: { x: sh.x, y: sh.y },

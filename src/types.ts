@@ -93,6 +93,8 @@ export interface TextSegment {
   textUnderlineOffset?: string;
   textTransform?: string;
   fontVariantCaps?: string;
+  /** background-clip:text 로 이 구간 글자에만 칠해지는 배경(그라디언트 글자) */
+  textFillImage?: string;
   letterSpacing?: string;
 }
 

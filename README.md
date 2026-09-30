@@ -37,7 +37,8 @@ text nodes, and vectors.
 - **Modern color syntax** — `oklch()`, `oklab()`, `color()`, and `color-mix()` (Tailwind v4's
   default palette) in backgrounds, gradients (including `in oklab` interpolation hints), shadows,
   borders, and SVG paints are converted to colors Figma understands.
-- **Gradient text** — `background-clip: text` with transparent text becomes a gradient text fill.
+- **Gradient text** — `background-clip: text` with transparent text becomes a gradient text fill,
+  also for a gradient `<span>` inside a sentence (only that range is painted).
 - **Borders** — per-side widths with inside stroke alignment; `dashed` and `dotted` borders become
   dashed strokes. Sides with different colors (a colored left accent on a gray box) are drawn as one
   rectangle per side so each keeps its color.

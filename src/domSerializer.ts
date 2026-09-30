@@ -626,7 +626,7 @@ type SegStyle = Omit<TextSegment, 'text'>;
 const SEG_KEYS: (keyof SegStyle)[] = [
   'fontFamily', 'fontWeight', 'fontStyle', 'fontSize', 'color', 'textDecoration', 'textDecorationStyle',
   'textDecorationColor', 'textDecorationThickness', 'textUnderlineOffset', 'textTransform', 'fontVariantCaps',
-  'letterSpacing',
+  'letterSpacing', 'textFillImage',
 ];
 
 type Decoration = Pick<TextSegment, 'textDecoration' | 'textDecorationStyle' | 'textDecorationColor' |
@@ -667,6 +667,8 @@ function segStyleOf(el: Element, win: Window): SegStyle {
     textTransform: cs.textTransform,
     fontVariantCaps: cs.fontVariantCaps,
     letterSpacing: cs.letterSpacing,
+    textFillImage: ((cs as any).webkitBackgroundClip || cs.backgroundClip) === 'text' && cs.backgroundImage !== 'none'
+      ? normalizeColorsIn(cs.backgroundImage) : '',
   };
 }
 
