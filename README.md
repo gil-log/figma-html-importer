@@ -97,8 +97,8 @@ text nodes, and vectors.
   (`cover`, `contain`, repeating tiles), `<canvas>` drawings, and `<video>` posters become Figma image
   fills with `object-fit` respected, and `filter: grayscale()`, `saturate()`, `contrast()`, and
   `brightness()` become Figma image adjustments. SVG, WebP, and AVIF images, and images larger than
-  4096px, are converted to PNG first. Images that cannot be fetched become gray placeholders of the
-  same size.
+  4096px, are converted to PNG first. Images that cannot be fetched, and embeds (`<iframe>`,
+  `<embed>`, `<object>`), become gray placeholders of the same size.
 
 ### Advanced DOM Handling
 

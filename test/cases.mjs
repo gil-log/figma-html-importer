@@ -1371,4 +1371,15 @@ export const cases = [
     html: '<div style="height:1500px">page</div><aside style="position:fixed;top:0;bottom:0;left:0;width:240px;background:rgb(0, 0, 255)"></aside>',
     check: ({ root }, t) => t.near(solidFrame(root, [0, 0, 255])?.height, 812, 1, 'drawer height'),
   },
+  {
+    id: 'iframe-placeholder',
+    title: '<iframe> 임베드는 같은 크기의 자리표시로 들어간다 (빈 흰 박스·기본 테두리 대신)',
+    width: 375,
+    html: '<div><iframe src="about:blank" width="200" height="100" style="display:block"></iframe></div>',
+    check: ({ root }, t) => {
+      const ph = find(root, (n) => n.name.startsWith('iframe'));
+      t.ok(ph && ph.type === 'RECTANGLE', `node ${ph?.type} ${ph?.name}`);
+      t.near(ph?.width, 204, 1, 'width incl. border');
+    },
+  },
 ];

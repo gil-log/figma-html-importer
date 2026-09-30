@@ -25,12 +25,14 @@ const REPLACED_TAGS = new Set([
 
 const FORM_TAGS = new Set(['input', 'textarea', 'select']);
 
-// 이미지로 가져오는 요소: <img>, 그려진 내용을 쓰는 <canvas>, 포스터를 쓰는 <video>
-const MEDIA_TAGS = new Set(['img', 'canvas', 'video']);
+// 이미지로 가져오는 요소: <img>, 그려진 내용을 쓰는 <canvas>, 포스터를 쓰는 <video>,
+// 내용을 읽을 수 없는 임베드(<iframe>·<embed>·<object>)는 같은 크기의 자리표시
+const MEDIA_TAGS = new Set(['img', 'canvas', 'video', 'iframe', 'embed', 'object']);
 
 function mediaImageUrl(el: Element, tag: string): string | undefined {
   if (tag === 'img') return (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || undefined;
   if (tag === 'video') return (el as HTMLVideoElement).poster || undefined;
+  if (tag !== 'canvas') return undefined;
   try {
     return (el as HTMLCanvasElement).toDataURL('image/png');
   } catch {

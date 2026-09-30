@@ -1400,8 +1400,8 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     return;
   }
 
-  // ── 이미지 (<img>, <canvas>, <video poster>) — 받아오지 못했으면 회색 자리표시 ──
-  if (tagName === 'img' || tagName === 'canvas' || tagName === 'video') {
+  // ── 이미지 (<img>, <canvas>, <video poster>) — 받아오지 못했거나 임베드(<iframe> 등)면 회색 자리표시 ──
+  if (['img', 'canvas', 'video', 'iframe', 'embed', 'object'].includes(tagName)) {
     const imgRect = figma.createRectangle();
     const hash = imageHash(imageUrl);
     imgRect.name = hash ? node.name ?? tagName : `${node.name ?? tagName} (placeholder)`;
