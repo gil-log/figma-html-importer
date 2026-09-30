@@ -381,6 +381,34 @@ function applyRadii(style: DomStyleData, cs: CSSStyleDeclaration, width: number,
   style.borderBottomLeftRadius = resolveRadius(cs.borderBottomLeftRadius, width, height);
 }
 
+/**
+ * clip-path 중 Figma 모서리 반경으로 똑같이 표현되는 것만 반영한다 (내용도 잘리도록 overflow 를 hidden 으로).
+ * - 정사각형을 가운데 기준으로 꽉 차게 자르는 circle()/ellipse() → 반지름 = 변의 절반
+ * - 여백 없는 inset(0 round R) → 반경 R
+ * polygon() 이나 박스보다 작게 자르는 경우는 표현할 수 없어 그대로 둔다.
+ */
+function applyClipPath(style: DomStyleData, cs: CSSStyleDeclaration, width: number, height: number): void {
+  const clip = (cs as any).clipPath as string | undefined;
+  if (!clip || clip === 'none') return;
+  let radius: number | null = null;
+  const centered = (at: string | undefined) => !at || /^(50% 50%|center|center center)$/.test(at.trim());
+  const shape = clip.match(/^(circle|ellipse)\(\s*([^)]*?)\s*(?:at\s+([^)]*))?\)$/);
+  if (shape && Math.abs(width - height) < 1 && centered(shape[3])) {
+    const half = width / 2;
+    const sizes = (shape[2] || 'closest-side').split(/\s+/).filter(Boolean);
+    const full = sizes.every((v) => v === 'closest-side' || v === 'farthest-side' || v === '50%' ||
+      (v.endsWith('px') && Math.abs(parseFloat(v) - half) < 1) ||
+      // circle() 의 % 는 √(w²+h²)/√2 기준 → 정사각형에서는 변 길이 기준과 같다
+      (v.endsWith('%') && Math.abs((parseFloat(v) / 100) * width - half) < 1));
+    if (full) radius = half;
+  }
+  const inset = clip.match(/^inset\(\s*([^)]*?)\s*round\s+([\d.]+)px[^)]*\)$/);
+  if (inset && inset[1].split(/\s+/).every((v) => pf(v) === 0)) radius = parseFloat(inset[2]);
+  if (radius === null) return;
+  style.borderTopLeftRadius = style.borderTopRightRadius = style.borderBottomRightRadius = style.borderBottomLeftRadius = round2(radius);
+  style.overflowX = style.overflowY = style.overflow = 'hidden';
+}
+
 function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
   return {
     backgroundColor: normalizeCssColor(cs.backgroundColor),
@@ -1120,6 +1148,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   const name = layerName(el, tag);
   if (name) node.name = name;
   applyRadii(node.style, cs, rect.width, rect.height);
+  applyClipPath(node.style, cs, rect.width, rect.height);
 
   if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);
   if (tag === 'progress' || tag === 'meter') {

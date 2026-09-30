@@ -42,7 +42,8 @@ text nodes, and vectors.
   dashed strokes. Sides with different colors (a colored left accent on a gray box) are drawn as one
   rectangle per side so each keeps its color.
 - **Corner radius** — uniform or per-corner values, with percentages resolved against the element
-  size.
+  size. `clip-path: circle()` on a square and `clip-path: inset(0 round …)` become the same corner
+  radius with clipped content.
 - **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
   drop or inner shadow with offset, blur, spread, and color. Spread-only rings on transparent
   elements (Tailwind `ring-*`) become strokes.

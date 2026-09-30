@@ -1265,4 +1265,16 @@ export const cases = [
       t.ok(svgs.some((v) => v.includes('rgb(255, 185, 0)')), 'meter below low is yellow');
     },
   },
+  {
+    id: 'clip-path-circle',
+    title: 'clip-path:circle()·inset(round) 는 같은 모양의 모서리 반경과 잘림으로 들어간다',
+    width: 375,
+    html: `<div><img src="${PNG_1PX}" style="display:block;width:40px;height:40px;clip-path:circle(50%)"><div style="width:60px;height:30px;background:red;clip-path:inset(0 round 10px)"><div style="width:80px;height:10px;background:blue"></div></div></div>`,
+    check: ({ root }, t) => {
+      t.near(find(root, (n) => n.type === 'RECTANGLE')?.cornerRadius, 20, 0.5, 'circle radius');
+      const box = solidFrame(root, [255, 0, 0]);
+      t.near(box?.cornerRadius, 10, 0.5, 'inset round radius');
+      t.eq(box?.clipsContent, true, 'content clipped');
+    },
+  },
 ];
