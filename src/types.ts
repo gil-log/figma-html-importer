@@ -36,6 +36,12 @@ export interface DomStyleData {
   // 기타 시각
   opacity: number;
   boxShadow: string;
+  textShadow: string;
+  filter: string;
+  backdropFilter: string;
+  mixBlendMode: string;
+  /** background-clip:text 로 글자에만 칠해지는 배경(그라디언트 글자) */
+  textFillImage: string;
   overflow: string;
   overflowX: string;
   overflowY: string;

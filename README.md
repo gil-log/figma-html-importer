@@ -29,8 +29,11 @@ text nodes, and vectors.
 
 ### Styles
 
-- **Backgrounds** — solid colors and stacked linear gradients, drawn in the same direction as the
-  browser (angles, side/corner keywords, non-square boxes) with percentage or px color stops.
+- **Backgrounds** — solid colors and stacked linear, radial, and conic gradients. Linear gradients
+  are drawn in the same direction as the browser (angles, side/corner keywords, non-square boxes);
+  radial gradients keep their center, shape, and size keyword (`closest-side`, `farthest-corner`, …).
+  Color stops can be percentages, px, or angles.
+- **Gradient text** — `background-clip: text` with transparent text becomes a gradient text fill.
 - **Borders** — per-side widths and colors with inside stroke alignment; `dashed` and `dotted`
   borders become dashed strokes.
 - **Corner radius** — uniform or per-corner values, with percentages resolved against the element
@@ -38,6 +41,9 @@ text nodes, and vectors.
 - **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
   drop or inner shadow with offset, blur, spread, and color. Spread-only rings on transparent
   elements (Tailwind `ring-*`) become strokes.
+- **Blur and blend modes** — `filter: blur()` becomes a layer blur, `backdrop-filter: blur()` a
+  background blur (Figma's blur radius is twice the CSS value), `filter: drop-shadow()` a drop shadow,
+  and `mix-blend-mode` the layer blend mode. `text-shadow` becomes a drop shadow on the text layer.
 - **Opacity & overflow** — element opacity (including `opacity: 0`), and `overflow` other than
   `visible` (hidden, clip, auto, scroll) on either axis mapped to `clipsContent`. Frames keep the
   element's own size, so overflowing children never stretch a background.

@@ -523,6 +523,99 @@ export const cases = [
     check: ({ root }, t) => t.ok(!find(root, (n) => n.type === 'FRAME' && (n.fills || []).some((f) => f.type.startsWith('GRADIENT'))), 'no gradient frame'),
   },
 
+  // ── 효과 ─────────────────────────────────────────────────
+  {
+    id: 'effect-blur',
+    title: 'filter:blur(4px) 는 반경 8 의 레이어 blur 로 들어간다 (Figma 반경 = CSS × 2)',
+    width: 375,
+    html: '<div style="padding:10px"><div style="width:50px;height:50px;background:red;filter:blur(4px)"></div></div>',
+    check: ({ root }, t) => {
+      const e = solidFrame(root, [255, 0, 0])?.effects?.[0];
+      t.eq(e?.type, 'LAYER_BLUR', 'type');
+      t.eq(e?.radius, 8, 'radius');
+    },
+  },
+  {
+    id: 'effect-backdrop-blur',
+    title: 'backdrop-filter:blur(10px) 는 반경 20 의 배경 blur 로 들어간다',
+    width: 375,
+    html: '<div style="padding:10px"><div style="width:80px;height:40px;background:rgba(255,255,255,.5);backdrop-filter:blur(10px)"></div></div>',
+    check: ({ root }, t) => {
+      const e = frameBy(root, (n) => n.width === 80)?.effects?.find((x) => x.type === 'BACKGROUND_BLUR');
+      t.eq(e?.radius, 20, 'radius');
+    },
+  },
+  {
+    id: 'effect-drop-shadow-filter',
+    title: 'filter:drop-shadow() 는 드롭 섀도로 들어간다',
+    width: 375,
+    html: '<div style="padding:10px"><div style="width:50px;height:50px;background:red;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))"></div></div>',
+    check: ({ root }, t) => {
+      const e = solidFrame(root, [255, 0, 0])?.effects?.[0];
+      t.eq(e?.type, 'DROP_SHADOW', 'type');
+      t.eq(e?.offset?.y, 2, 'offset');
+    },
+  },
+  {
+    id: 'effect-blend-mode',
+    title: 'mix-blend-mode 는 레이어 블렌드 모드로 들어간다',
+    width: 375,
+    html: '<div style="padding:10px"><div style="width:50px;height:50px;background:red;mix-blend-mode:multiply"></div></div>',
+    check: ({ root }, t) => t.eq(solidFrame(root, [255, 0, 0])?.blendMode, 'MULTIPLY', 'blendMode'),
+  },
+  {
+    id: 'text-gradient-clip',
+    title: 'background-clip:text 그라디언트 글자는 텍스트 fill 이 그라디언트로 들어간다',
+    width: 375,
+    html: '<div><h1 style="margin:0;background:linear-gradient(90deg,red,blue);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-block">Gradient</h1></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'Gradient')?.fills?.[0]?.type, 'GRADIENT_LINEAR', 'text fill'),
+  },
+  {
+    id: 'text-shadow',
+    title: 'text-shadow 는 텍스트 드롭 섀도로 들어간다',
+    width: 375,
+    html: '<div><p style="text-shadow:0 1px 2px rgba(0,0,0,.5)">shadowed</p></div>',
+    check: ({ root }, t) => {
+      const e = findText(root, 'shadowed')?.effects?.[0];
+      t.eq(e?.type, 'DROP_SHADOW', 'type');
+      t.eq(e?.radius, 2, 'radius');
+    },
+  },
+  {
+    id: 'text-transparent',
+    title: 'color:transparent 글자는 보이지 않는다 (검정으로 칠해지지 않는다)',
+    width: 375,
+    html: '<div><p style="color:transparent">invisible</p><p>visible</p></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'invisible')?.fills, [], 'no fill'),
+  },
+  {
+    id: 'gradient-radial',
+    title: 'radial-gradient 는 CSS 와 같은 중심·반지름의 원형 그라디언트로 들어간다',
+    width: 375,
+    html: '<div><div style="width:200px;height:100px;background:radial-gradient(circle at 25% 50%, red, blue)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 200)?.fills?.find((f) => f.type === 'GRADIENT_RADIAL');
+      if (!t.ok(g, 'radial fill')) return;
+      const h = gradientHandles(g);
+      const r = Math.hypot(150, 50); // (50,50) 에서 가장 먼 모서리 (200,100) 까지
+      t.near(h.center[0], 0.25, 0.01, 'center.x'); t.near(h.center[1], 0.5, 0.01, 'center.y');
+      t.near(h.end[0], (50 + r) / 200, 0.01, 'x edge'); t.near(h.yEdge[1], (50 + r) / 100, 0.01, 'y edge');
+    },
+  },
+  {
+    id: 'gradient-conic',
+    title: 'conic-gradient 는 시작 각도 방향을 기준으로 한 각도 그라디언트로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:100px;background:conic-gradient(from 90deg, red, blue)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 100)?.fills?.find((f) => f.type === 'GRADIENT_ANGULAR');
+      if (!t.ok(g, 'angular fill')) return;
+      const h = gradientHandles(g);
+      t.near(h.center[0], 0.5, 0.01, 'center.x');
+      t.near(h.end[0], 1, 0.01, 'starts toward the right (from 90deg)'); t.near(h.end[1], 0.5, 0.01, 'start y');
+    },
+  },
+
   // ── 박스·레이아웃 ─────────────────────────────────────────
   {
     id: 'overflow-scroll',

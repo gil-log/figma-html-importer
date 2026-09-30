@@ -359,6 +359,10 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
       if (bgClip === 'text') return '';
       return cs.backgroundImage || '';
     })(),
+    textFillImage: (() => {
+      const bgClip = (cs as any).webkitBackgroundClip || cs.backgroundClip;
+      return bgClip === 'text' && cs.backgroundImage !== 'none' ? cs.backgroundImage : '';
+    })(),
     backgroundSize: cs.backgroundSize,
     backgroundRepeat: cs.backgroundRepeat,
     objectFit: cs.objectFit,
@@ -386,6 +390,10 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     // opacity:0 도 그대로 살려야 하므로 pf() || 1 로 쓰지 않는다
     opacity: cs.opacity === '' ? 1 : parseFloat(cs.opacity),
     boxShadow: cs.boxShadow,
+    textShadow: cs.textShadow,
+    filter: cs.filter,
+    backdropFilter: (cs as any).backdropFilter || (cs as any).webkitBackdropFilter || 'none',
+    mixBlendMode: cs.mixBlendMode,
     overflow: cs.overflow,
     overflowX: cs.overflowX,
     overflowY: cs.overflowY,
@@ -705,6 +713,9 @@ function plainTextStyle(cs: CSSStyleDeclaration): DomStyleData {
     borderColor: 'transparent',
     borderStyle: 'none',
     boxShadow: 'none',
+    filter: 'none',
+    backdropFilter: 'none',
+    mixBlendMode: 'normal',
     paddingTop: 0,
     paddingRight: 0,
     paddingBottom: 0,

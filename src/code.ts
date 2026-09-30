@@ -329,8 +329,12 @@ function parseColorStops(parts: string[], lengthPx: number): { position: number;
       : parseColor(colorMatch[1]) ?? parseHexColor(colorMatch[1]);
     if (!parsed) continue;
     const color = { ...parsed.rgb, a: parsed.a };
-    const positions = colorMatch[2].trim().split(/\s+/).filter(Boolean).map((p) =>
-      p.endsWith('%') ? parseFloat(p) / 100 : p.endsWith('px') && lengthPx > 0 ? parseFloat(p) / lengthPx : NaN);
+    const positions = colorMatch[2].trim().split(/\s+/).filter(Boolean).map((p) => {
+      if (p.endsWith('%')) return parseFloat(p) / 100;
+      if (p.endsWith('px') && lengthPx > 0) return parseFloat(p) / lengthPx;
+      const angle = parseAngle(p); // conic-gradient 스톱 각도
+      return angle !== null ? angle / 360 : NaN;
+    });
     if (positions.length === 0) raw.push({ color, pos: null });
     for (const p of positions) raw.push({ color, pos: isNaN(p) ? null : p });
   }
@@ -442,6 +446,128 @@ function parseLinearGradient(css: string, w: number, h: number): GradientPaint |
   };
 }
 
+/** "left"/"center"/"30%"/"12px" → px (기준 길이 base 에 대한 위치) */
+function parsePosition(token: string | undefined, base: number): number {
+  if (!token || token === 'center') return base / 2;
+  if (token === 'left' || token === 'top') return 0;
+  if (token === 'right' || token === 'bottom') return base;
+  return token.endsWith('%') ? (parseFloat(token) / 100) * base : parseFloat(token) || 0;
+}
+
+/** "at X Y" 부분 → 픽셀 중심 */
+function parseAtPosition(spec: string, W: number, H: number): { cx: number; cy: number } {
+  const at = spec.match(/\bat\s+(.+)$/);
+  if (!at) return { cx: W / 2, cy: H / 2 };
+  let [x, y] = at[1].trim().split(/\s+/);
+  // "at top" / "at bottom" 처럼 세로 키워드만 온 경우
+  if ((x === 'top' || x === 'bottom') && (y === undefined || y === 'left' || y === 'right' || y === 'center')) [x, y] = [y, x];
+  return { cx: parsePosition(x, W), cy: parsePosition(y, H) };
+}
+
+/**
+ * CSS radial-gradient() → Figma GRADIENT_RADIAL.
+ * Figma 그라디언트 공간의 원(중심 (0.5,0.5), 반지름 0.5)을 CSS 가 계산한 중심·가로/세로 반지름으로 옮기는 행렬의 역행렬.
+ */
+function parseRadialGradient(css: string, w: number, h: number): GradientPaint | null {
+  const m = css.trim().match(/^radial-gradient\(([\s\S]+)\)$/i);
+  if (!m) return null;
+  const parts = splitTopLevelCommas(m[1]);
+  const W = Math.max(w, 1);
+  const H = Math.max(h, 1);
+  const first = parts[0].trim().toLowerCase();
+  const hasSpec = !/^(rgba?\(|color\(|#|transparent)/.test(first);
+  const spec = hasSpec ? first : '';
+  const stopParts = hasSpec ? parts.slice(1) : parts;
+
+  const { cx, cy } = parseAtPosition(spec, W, H);
+  const shapeSpec = spec.replace(/\bat\s+.+$/, '').trim();
+  const circle = /\bcircle\b/.test(shapeSpec) || (/^[\d.]+px$/.test(shapeSpec.replace(/\bcircle\b/, '').trim()));
+  const sideX = [cx, W - cx];
+  const sideY = [cy, H - cy];
+  const corners = [[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - cx, y - cy));
+  const lengths = shapeSpec.replace(/\b(circle|ellipse)\b/g, '').trim().split(/\s+/).filter(Boolean);
+  const keyword = lengths.find((l) => /-(side|corner)$/.test(l)) ?? (lengths.length ? null : 'farthest-corner');
+  let rx: number;
+  let ry: number;
+  if (keyword) {
+    const near = keyword.startsWith('closest');
+    if (circle) {
+      const r = keyword.endsWith('side')
+        ? (near ? Math.min(...sideX, ...sideY) : Math.max(...sideX, ...sideY))
+        : (near ? Math.min(...corners) : Math.max(...corners));
+      rx = ry = r;
+    } else {
+      rx = near ? Math.min(...sideX) : Math.max(...sideX);
+      ry = near ? Math.min(...sideY) : Math.max(...sideY);
+      // 모서리 기준 타원은 변 기준 타원의 비율을 유지하며 모서리를 지나도록 √2 배
+      if (keyword.endsWith('corner')) {
+        rx *= Math.SQRT2;
+        ry *= Math.SQRT2;
+      }
+    }
+  } else {
+    rx = parsePosition(lengths[0], W);
+    ry = circle ? rx : parsePosition(lengths[1] ?? lengths[0], H);
+  }
+  rx = Math.max(rx, 0.01);
+  ry = Math.max(ry, 0.01);
+
+  const stops = parseColorStops(stopParts, rx);
+  if (stops.length < 2) return null;
+  // 100% 밖 스톱은 반지름을 늘려서 표현
+  const tMax = Math.max(1, stops[stops.length - 1].position);
+  if (tMax > 1) {
+    rx *= tMax;
+    ry *= tMax;
+    for (const st of stops) st.position /= tMax;
+  }
+  const M: Transform = [
+    [(2 * rx) / W, 0, (cx - rx) / W],
+    [0, (2 * ry) / H, (cy - ry) / H],
+  ];
+  return {
+    type: 'GRADIENT_RADIAL',
+    gradientTransform: invertTransform(M),
+    gradientStops: stops.map((st) => ({ position: Math.min(1, Math.max(0, st.position)), color: st.color })),
+    opacity: 1,
+  };
+}
+
+/**
+ * CSS conic-gradient() → Figma GRADIENT_ANGULAR.
+ * 그라디언트 공간 +x 를 CSS 시작 방향(from, 위=0° 시계방향)으로, +y 를 그보다 90° 시계방향으로 둔다.
+ */
+function parseConicGradient(css: string, w: number, h: number): GradientPaint | null {
+  const m = css.trim().match(/^conic-gradient\(([\s\S]+)\)$/i);
+  if (!m) return null;
+  const parts = splitTopLevelCommas(m[1]);
+  const W = Math.max(w, 1);
+  const H = Math.max(h, 1);
+  const first = parts[0].trim().toLowerCase();
+  const hasSpec = /^(from|at)\b/.test(first);
+  const spec = hasSpec ? first : '';
+  const stopParts = hasSpec ? parts.slice(1) : parts;
+  const from = parseAngle(spec.match(/from\s+(\S+)/)?.[1] ?? '0deg') ?? 0;
+  const { cx, cy } = parseAtPosition(spec, W, H);
+  const stops = parseColorStops(stopParts, 0);
+  if (stops.length < 2) return null;
+
+  const r = Math.min(W, H) / 2;
+  const a = (from * Math.PI) / 180;
+  const u = [(r * Math.sin(a)) / W, (-r * Math.cos(a)) / H];
+  const v = [(r * Math.cos(a)) / W, (r * Math.sin(a)) / H];
+  const M: Transform = [
+    [2 * u[0], 2 * v[0], cx / W - u[0] - v[0]],
+    [2 * u[1], 2 * v[1], cy / H - u[1] - v[1]],
+  ];
+  return {
+    type: 'GRADIENT_ANGULAR',
+    gradientTransform: invertTransform(M),
+    gradientStops: stops.map((st) => ({ position: Math.min(1, Math.max(0, st.position)), color: st.color })),
+    opacity: 1,
+  };
+}
+
 /**
  * background-color + background-image(여러 겹) → Figma fills.
  * CSS 는 첫 번째 레이어가 맨 위, Figma fills 는 마지막이 맨 위이므로 뒤집는다.
@@ -458,6 +584,8 @@ function backgroundPaints(s: DomStyleData, w: number, h: number): Paint[] {
     const layerPaints: Paint[] = [];
     layers.forEach((layer, i) => {
       const paint = parseLinearGradient(layer, w, h) ??
+        parseRadialGradient(layer, w, h) ??
+        parseConicGradient(layer, w, h) ??
         backgroundImagePaint(layer, sizes[i % sizes.length], repeats[i % repeats.length]);
       if (paint) layerPaints.push(paint);
     });
@@ -590,7 +718,8 @@ function applyStrokes(frame: FrameNode, s: DomStyleData): void {
  */
 function applyEffects(node: FrameNode | RectangleNode, s: DomStyleData): void {
   const shadows = parseShadows(s.boxShadow);
-  if (shadows.length === 0) return;
+  const extra = filterEffects(s);
+  if (shadows.length === 0 && extra.length === 0) return;
 
   const hasVisibleFill = Array.isArray(node.fills) && node.fills.length > 0;
   let spreadOk = node.type === 'RECTANGLE';
@@ -622,7 +751,47 @@ function applyEffects(node: FrameNode | RectangleNode, s: DomStyleData): void {
     };
     effects.push(sh.inset ? { type: 'INNER_SHADOW', ...base } : { type: 'DROP_SHADOW', ...base });
   }
+  effects.push(...extra);
   if (effects.length > 0) node.effects = effects;
+}
+
+/**
+ * filter / backdrop-filter → Figma 효과.
+ * Figma blur 반경은 CSS blur() 의 2배로 계산된다 (Figma Dev Mode 도 CSS 로 내보낼 때 2로 나눈다).
+ * drop-shadow() 는 드롭 섀도, 그 외 색 보정 필터(brightness 등)는 Figma 에 대응하는 효과가 없어 넘어간다.
+ */
+function filterEffects(s: DomStyleData): Effect[] {
+  const out: Effect[] = [];
+  const blurOf = (css: string | undefined) => {
+    const m = (css || '').match(/blur\(\s*([\d.]+)px\s*\)/);
+    return m ? parseFloat(m[1]) : 0;
+  };
+  const layer = blurOf(s.filter);
+  if (layer > 0) out.push({ type: 'LAYER_BLUR', blurType: 'NORMAL', radius: layer * 2, visible: true });
+  const backdrop = blurOf(s.backdropFilter);
+  if (backdrop > 0) out.push({ type: 'BACKGROUND_BLUR', blurType: 'NORMAL', radius: backdrop * 2, visible: true });
+  for (const m of (s.filter || '').matchAll(/drop-shadow\(((?:[^()]|\([^()]*\))*)\)/g)) {
+    for (const sh of parseShadows(m[1])) {
+      out.push({
+        type: 'DROP_SHADOW', color: { ...sh.color.rgb, a: sh.color.a }, offset: { x: sh.x, y: sh.y },
+        radius: Math.max(0, sh.blur), visible: true, blendMode: 'NORMAL', showShadowBehindNode: true,
+      });
+    }
+  }
+  return out;
+}
+
+const BLEND_MODES: Record<string, BlendMode> = {
+  multiply: 'MULTIPLY', screen: 'SCREEN', overlay: 'OVERLAY', darken: 'DARKEN', lighten: 'LIGHTEN',
+  'color-dodge': 'COLOR_DODGE', 'color-burn': 'COLOR_BURN', 'hard-light': 'HARD_LIGHT', 'soft-light': 'SOFT_LIGHT',
+  difference: 'DIFFERENCE', exclusion: 'EXCLUSION', hue: 'HUE', saturation: 'SATURATION', color: 'COLOR',
+  luminosity: 'LUMINOSITY', 'plus-lighter': 'LINEAR_DODGE',
+};
+
+/** mix-blend-mode → Figma 레이어 블렌드 모드 */
+function applyBlendMode(node: SceneNode & MinimalBlendMixin, s: DomStyleData): void {
+  const mode = BLEND_MODES[s.mixBlendMode];
+  if (mode) node.blendMode = mode;
 }
 
 function applyFrameStyle(frame: FrameNode, s: DomStyleData, w: number, h: number): void {
@@ -630,6 +799,7 @@ function applyFrameStyle(frame: FrameNode, s: DomStyleData, w: number, h: number
 
   applyCornerRadius(frame, s);
   if (s.opacity < 1) frame.opacity = s.opacity;
+  applyBlendMode(frame, s);
   applyStrokes(frame, s);
   // overflow 가 visible 이 아니면(hidden·clip·auto·scroll) 넘치는 자식을 자른다
   // (둥근 모서리 카드, 가로 스크롤 칩·캐러셀). visible → 절대위치 뱃지/도트가 부모 경계 밖에 보인다
@@ -718,8 +888,9 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
  * - 한 줄: 자동 폭(WIDTH_AND_HEIGHT) → Figma 글꼴 폭 차이로 줄바꿈되지 않게 하고, 정렬 기준점(왼쪽/가운데/오른쪽)에 맞춘다
  * 세로는 글자 영역 중심에 맞춘다.
  * @param ox, oy 노드 rect 원점의 부모 기준 좌표
+ * @param layerEffects false 면 filter·블렌드 모드를 넣지 않는다 (배경 박스 프레임이 이미 가진 경우)
  */
-async function createTextNode(node: DomNodeData, ox: number, oy: number): Promise<TextNode> {
+async function createTextNode(node: DomNodeData, ox: number, oy: number, layerEffects = true): Promise<TextNode> {
   const { style, rect } = node;
   const fontName = await resolveFont(style.fontFamily, style.fontWeight, style.fontStyle, node.text ?? '');
 
@@ -728,7 +899,7 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number): Promis
   t.fontSize = Math.max(style.fontSize, 1);
   t.characters = node.text ?? '';
   const textPaint = toSolidPaint(style.color);
-  if (textPaint) t.fills = [textPaint];
+  t.fills = textPaint ? [textPaint] : [];
   const lh = parseFloat(style.lineHeight);
   if (!isNaN(lh) && lh > 0 && style.lineHeight !== 'normal') t.lineHeight = { value: lh, unit: 'PIXELS' };
   const ls = toLetterSpacing(style.letterSpacing);
@@ -760,6 +931,20 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number): Promis
     else t.x = ox + box.x;
   }
   t.y = oy + box.y + box.height / 2 - t.height / 2;
+
+  // background-clip:text 그라디언트 글자 → 텍스트 fill 을 그라디언트로
+  if (style.textFillImage && !textPaint) {
+    const paints = backgroundPaints({ ...style, backgroundColor: 'transparent', backgroundImage: style.textFillImage },
+      t.width, t.height);
+    if (paints.length) t.fills = paints;
+  }
+  const effects: Effect[] = parseShadows(style.textShadow).map((sh) => ({
+    type: 'DROP_SHADOW', color: { ...sh.color.rgb, a: sh.color.a }, offset: { x: sh.x, y: sh.y },
+    radius: Math.max(0, sh.blur), visible: true, blendMode: 'NORMAL', showShadowBehindNode: true,
+  }));
+  if (layerEffects) effects.push(...filterEffects(style));
+  if (effects.length) t.effects = effects;
+  if (layerEffects) applyBlendMode(t, style);
   return t;
 }
 
@@ -828,7 +1013,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       frame.x = rect.x;
       frame.y = rect.y;
       applyFrameStyle(frame, style, w, h);
-      frame.appendChild(await createTextNode(node, 0, 0));
+      frame.appendChild(await createTextNode(node, 0, 0, false));
       applyEffects(frame, style);
       applyRotation(frame, node);
       if (!visible) frame.visible = false;
@@ -877,6 +1062,9 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
         svgFrame.x = rect.x;
         svgFrame.y = rect.y;
         if (style.opacity < 1) svgFrame.opacity = style.opacity;
+        const svgEffects = filterEffects(style);
+        if (svgEffects.length) svgFrame.effects = svgEffects;
+        applyBlendMode(svgFrame, style);
         applyRotation(svgFrame, node);
         if (!visible) svgFrame.visible = false;
         parent.appendChild(svgFrame);
@@ -911,6 +1099,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       : [{ type: 'SOLID', color: { r: 0.88, g: 0.9, b: 0.92 } }];
     applyCornerRadius(imgRect, style);
     applyEffects(imgRect, style);
+    applyBlendMode(imgRect, style);
     if (style.opacity < 1) imgRect.opacity = style.opacity;
     imgRect.x = rect.x;
     imgRect.y = rect.y;
