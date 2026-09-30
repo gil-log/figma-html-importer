@@ -1351,4 +1351,24 @@ export const cases = [
     html: `<div><img src="${PNG_1PX}" style="display:block;width:40px;height:40px;filter:grayscale(1)"></div>`,
     check: ({ root }, t) => t.eq(imageFill(find(root, (n) => n.type === 'RECTANGLE'))?.filters?.saturation, -1, 'saturation'),
   },
+  {
+    id: 'fixed-overlay-modal',
+    title: '긴 페이지 위의 전체 화면 모달(fixed inset-0)은 첫 화면(뷰포트) 크기로, 모달은 그 가운데에 들어간다',
+    width: 375,
+    html: '<div style="height:2000px;background:#eee">long page</div><div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center"><div style="width:200px;height:100px;background:rgb(255, 255, 255)">modal</div></div>',
+    check: ({ root }, t) => {
+      const overlay = find(root, (n) => n.type === 'FRAME' && (n.fills || []).some((f) => f.type === 'SOLID' && Math.abs((f.opacity ?? 1) - 0.5) < 0.01));
+      t.near(overlay?.height, 812, 1, 'overlay = viewport height');
+      t.near(overlay?.ay, 0, 1, 'overlay at top');
+      const modal = find(root, (n) => n.type === 'FRAME' && n.width === 200);
+      t.near(modal && modal.ay + modal.height / 2, 406, 2, 'modal centered in viewport');
+    },
+  },
+  {
+    id: 'fixed-drawer',
+    title: '전체 높이 사이드 드로어(fixed inset-y-0)는 뷰포트 높이로 들어간다',
+    width: 375,
+    html: '<div style="height:1500px">page</div><aside style="position:fixed;top:0;bottom:0;left:0;width:240px;background:rgb(0, 0, 255)"></aside>',
+    check: ({ root }, t) => t.near(solidFrame(root, [0, 0, 255])?.height, 812, 1, 'drawer height'),
+  },
 ];

@@ -159,7 +159,8 @@ text nodes, and vectors.
   are shown as placeholders.
 - Fonts that are not available in your Figma fall back as described above.
 - `position: fixed` elements are placed relative to the whole page, so a fixed bottom bar ends up at
-  the bottom of the imported frame.
+  the bottom of the imported frame. Fixed elements that fill the viewport (modal overlays, side
+  drawers) keep the size and position they had on the first screen.
 - CSS animations, transitions, and interactive states are not captured.
 
 ## Development

@@ -102,17 +102,27 @@ export async function renderHtml(html: string, viewport: Viewport): Promise<Rend
 /**
  * position:fixed 요소를 문서 기준 absolute 로 바꾼다.
  * 뷰포트 기준 좌표 대신 문서(=결과 프레임) 기준으로 배치되어 모바일 UI 의 하단 바가 결과 맨 아래에 붙는다.
+ * 단 위아래를 모두 붙여 뷰포트를 채우던 요소(전체 화면 모달 오버레이, 사이드 드로어)는 바꾸면 페이지 전체 높이로
+ * 늘어나므로, 바꾸기 전 뷰포트 기준 위치·높이로 고정해 첫 화면에 보이던 모습 그대로 둔다.
  * 렌더 iframe 은 캡처 후 버리므로 원래대로 되돌리지 않는다.
  */
 export function prepareForCapture(doc: Document, win: Window): void {
   const html = doc.documentElement;
-  const fixed: HTMLElement[] = [];
+  const fixed: { el: HTMLElement; before: DOMRect }[] = [];
   for (const el of Array.from(doc.querySelectorAll<HTMLElement>('body *'))) {
-    if (win.getComputedStyle(el).position === 'fixed') fixed.push(el);
+    if (win.getComputedStyle(el).position === 'fixed') fixed.push({ el, before: el.getBoundingClientRect() });
   }
   if (fixed.length === 0) return;
   if (win.getComputedStyle(html).position === 'static') html.style.position = 'relative';
-  for (const el of fixed) el.style.setProperty('position', 'absolute', 'important');
+  for (const { el } of fixed) el.style.setProperty('position', 'absolute', 'important');
+  for (const { el, before } of fixed) {
+    const after = el.getBoundingClientRect();
+    if (Math.abs(after.height - before.height) <= 1) continue;
+    const top = parseFloat(win.getComputedStyle(el).top) || 0;
+    el.style.setProperty('top', `${top + before.top - after.top}px`, 'important');
+    el.style.setProperty('bottom', 'auto', 'important');
+    el.style.setProperty('height', `${before.height}px`, 'important');
+  }
 }
 
 const NON_CONTENT_TAGS = new Set([
