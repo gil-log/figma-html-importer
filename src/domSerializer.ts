@@ -1114,6 +1114,15 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
         ? { x: m.box.left - origin.left, width: m.box.right - m.box.left }
         : { x: box.left + cb.x - origin.left, width: cb.width };
       fillText(node, built, m, origin, wrap, truncate);
+      // 여러 줄 말줄임: Range 는 잘려 숨은 줄까지 잡으므로 보이는 줄만큼을 content 위쪽부터 글자 영역으로 쓴다
+      if (truncate && truncate.maxLines > 1 && node.textBox) {
+        const lineH = parseFloat(cs.lineHeight) || (m.box.bottom - m.box.top) / m.lines;
+        node.textBox = {
+          ...node.textBox,
+          y: round2(box.top + cb.y - origin.top),
+          height: round2(lineH * Math.min(truncate.maxLines, m.lines)),
+        };
+      }
     }
   } else {
     for (const run of runs) {

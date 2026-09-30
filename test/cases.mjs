@@ -1146,6 +1146,17 @@ export const cases = [
     },
   },
   {
+    id: 'line-clamp-position',
+    title: '여러 줄 말줄임(line-clamp)은 숨겨진 줄과 무관하게 content 위쪽에 놓인다',
+    width: 375,
+    html: '<div style="width:160px;padding:10px"><p style="margin:0;font-size:14px;line-height:20px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">This is a long description that will be clamped to exactly two lines even though it has many more words in it than fit</p></div>',
+    check: ({ root }, t) => {
+      const n = findTextIncl(root, 'long description');
+      t.eq(n?.maxLines, 2, 'maxLines');
+      t.near(n?.ay, 10, 2, 'top of content');
+    },
+  },
+  {
     id: 'pseudo-attr-content',
     title: 'content: attr(data-count) 가상요소 글자(알림 숫자 배지)가 들어간다',
     width: 375,
