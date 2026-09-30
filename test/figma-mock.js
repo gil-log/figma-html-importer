@@ -235,7 +235,8 @@
     for (const p of ['opacity', 'visible', 'clipsContent', 'cornerRadius', 'topLeftRadius', 'strokeWeight',
       'strokeAlign', 'dashPattern', 'blendMode', 'layoutMode', 'itemSpacing', 'counterAxisSpacing',
       'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'primaryAxisAlignItems',
-      'counterAxisAlignItems', 'layoutPositioning', 'layoutWrap', 'svg']) {
+      'counterAxisAlignItems', 'layoutPositioning', 'layoutWrap', 'layoutSizingHorizontal', 'layoutSizingVertical',
+      'svg']) {
       if (n[p] !== undefined) o[p] = n[p];
     }
     o.fills = n.fills;

@@ -102,6 +102,11 @@ text nodes, and vectors.
   with styled ranges and line breaks. Inline pieces that draw their own box — badges with a
   background, icons, `inline-block` or `display: block` children — stay separate layers at their
   measured positions. Children hidden with `display: none` are left out.
+- **Auto Layout (optional)** — with "flex 를 Auto Layout 으로 변환" checked, flex containers become
+  Figma Auto Layout frames (direction, gap, padding, `justify-content`, `align-items`, stretched
+  children, absolutely positioned children kept in place). A container is converted only when the
+  layout Figma would compute matches the browser within 1.5px, so margins, wrapping, or
+  `space-around` stay absolutely positioned instead of shifting.
 - **Layer names** — layers are named from `data-name` (or `data-figma-name`), `id`, `aria-label`,
   image `alt`, button/link text, or a meaningful class name; utility classes (Tailwind) are ignored.
   The imported frame takes the document `<title>`.

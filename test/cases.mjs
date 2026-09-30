@@ -304,6 +304,74 @@ export const cases = [
     },
   },
 
+  // ── Auto Layout (옵션) ────────────────────────────────────
+  {
+    id: 'autolayout-off-by-default',
+    title: 'Auto Layout 옵션을 켜지 않으면 flex 도 절대 배치로 들어간다',
+    width: 375,
+    html: '<div style="display:flex;gap:8px;padding:10px;background:#eee;width:200px"><div style="width:40px;height:40px;background:red"></div><div style="width:40px;height:40px;background:red"></div></div>',
+    check: ({ root }, t) => t.eq(root.layoutMode, 'NONE', 'layoutMode'),
+  },
+  {
+    id: 'autolayout-row',
+    title: '옵션을 켜면 gap·padding 이 맞는 flex 가로 줄은 Auto Layout(HORIZONTAL)이 된다',
+    width: 375,
+    options: { autoLayout: true },
+    html: '<div style="padding:4px"><div style="display:flex;gap:8px;padding:10px;background:#eee;width:200px"><div style="width:40px;height:40px;background:red"></div><div style="width:40px;height:40px;background:lime"></div><div style="width:40px;height:40px;background:blue"></div></div></div>',
+    check: ({ root }, t) => {
+      const f = solidFrame(root, [238, 238, 238]);
+      t.eq(f?.layoutMode, 'HORIZONTAL', 'layoutMode');
+      t.eq(f?.itemSpacing, 8, 'itemSpacing');
+      t.eq([f?.paddingLeft, f?.paddingTop], [10, 10], 'padding');
+      t.eq(f?.children?.map((c) => JSON.stringify(solid(c))), ['[255,0,0]', '[0,255,0]', '[0,0,255]'], 'order');
+    },
+  },
+  {
+    id: 'autolayout-root',
+    title: '붙여넣은 루트가 flex 줄이어도 Auto Layout 이 된다',
+    width: 375,
+    options: { autoLayout: true },
+    html: '<div style="display:flex;gap:4px;padding:6px;background:#eee;width:120px"><div style="width:30px;height:30px;background:red"></div><div style="width:30px;height:30px;background:blue"></div></div>',
+    check: ({ root }, t) => t.eq(root.layoutMode, 'HORIZONTAL', 'root layoutMode'),
+  },
+  {
+    id: 'autolayout-column-center',
+    title: '가운데 정렬된 flex 세로 배치는 VERTICAL + CENTER 정렬이 된다',
+    width: 375,
+    options: { autoLayout: true },
+    html: '<div style="padding:4px"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:120px;height:120px;background:#eee"><div style="width:40px;height:20px;background:red"></div><div style="width:60px;height:20px;background:blue"></div></div></div>',
+    check: ({ root }, t) => {
+      const f = solidFrame(root, [238, 238, 238]);
+      t.eq([f?.layoutMode, f?.primaryAxisAlignItems, f?.counterAxisAlignItems], ['VERTICAL', 'CENTER', 'CENTER'], 'layout');
+    },
+  },
+  {
+    id: 'autolayout-margin-fallback',
+    title: 'margin(ml-auto 등)으로 배치된 flex 는 Auto Layout 으로 바꾸지 않고 브라우저 위치를 유지한다',
+    width: 375,
+    options: { autoLayout: true },
+    html: '<div style="padding:4px"><div style="display:flex;gap:8px;width:200px;background:#eee"><div style="width:40px;height:40px;background:red"></div><div style="width:40px;height:40px;background:blue;margin-left:auto"></div></div></div>',
+    check: ({ root }, t) => {
+      const f = solidFrame(root, [238, 238, 238]);
+      t.eq(f?.layoutMode, 'NONE', 'layoutMode');
+      t.near(solidFrame(root, [0, 0, 255])?.x, 160, 0.5, 'right item stays at the right');
+    },
+  },
+  {
+    id: 'autolayout-absolute-child',
+    title: 'Auto Layout 이 된 컨테이너의 절대위치 자식은 ABSOLUTE 로 제자리에 남는다',
+    width: 375,
+    options: { autoLayout: true },
+    html: '<div style="padding:10px"><div style="position:relative;display:flex;gap:8px;background:#eee;width:120px"><div style="width:40px;height:40px;background:red"></div><div style="width:40px;height:40px;background:blue"></div><span style="position:absolute;top:-4px;right:-4px;width:8px;height:8px;background:lime"></span></div></div>',
+    check: ({ root }, t) => {
+      const f = solidFrame(root, [238, 238, 238]);
+      t.eq(f?.layoutMode, 'HORIZONTAL', 'layoutMode');
+      const badge = solidFrame(root, [0, 255, 0]);
+      t.eq(badge?.layoutPositioning, 'ABSOLUTE', 'absolute badge');
+      t.near(badge?.x, 116, 0.5, 'badge x');
+    },
+  },
+
   // ── 레이어 이름 ───────────────────────────────────────────
   {
     id: 'layer-names',

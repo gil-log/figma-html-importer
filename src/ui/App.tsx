@@ -30,6 +30,7 @@ const WHITE = 'rgb(255, 255, 255)';
 export default function App() {
   const [html, setHtml] = useState('');
   const [renderWidth, setRenderWidth] = useState(1440);
+  const [autoLayout, setAutoLayout] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [result, setResult] = useState<{ frameCount: number; textCount: number } | null>(null);
   const [error, setError] = useState('');
@@ -84,14 +85,16 @@ export default function App() {
       const images = await loadImages(collectImageUrls(domData));
 
       setStatus('building');
-      parent.postMessage({pluginMessage: {type: 'import-dom', data: domData, images, title: doc.title}}, '*');
+      parent.postMessage({pluginMessage: {
+        type: 'import-dom', data: domData, images, title: doc.title, options: {autoLayout},
+      }}, '*');
     } catch (e: any) {
       setStatus('error');
       setError(e.message ?? String(e));
     } finally {
       rendered?.dispose();
     }
-  }, [html, renderWidth]);
+  }, [html, renderWidth, autoLayout]);
 
   const handleReset = () => {
     setStatus('idle');
@@ -129,6 +132,18 @@ export default function App() {
             ))}
           </select>
         </div>
+
+        {/* 옵션 */}
+        <label className="option">
+          <input
+              id="opt-autolayout"
+              type="checkbox"
+              checked={autoLayout}
+              onChange={(e) => setAutoLayout(e.target.checked)}
+              disabled={isImporting}
+          />
+          <span>flex 를 Auto Layout 으로 변환 (브라우저 배치와 같을 때만)</span>
+        </label>
 
         {/* HTML 입력 */}
         <div className="textarea-wrap">

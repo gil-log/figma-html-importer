@@ -49,6 +49,7 @@ export interface DomStyleData {
   // 레이아웃
   display: string;
   flexDirection: string;
+  flexWrap: string;
   alignItems: string;
   justifyContent: string;
   rowGap: number;
@@ -132,6 +133,12 @@ export interface ImportDomMessage {
   images?: Record<string, ImageAsset>;
   /** 문서 <title> (루트 프레임 이름) */
   title?: string;
+  options?: ImportOptions;
+}
+
+export interface ImportOptions {
+  /** flex 컨테이너를 Auto Layout 으로 변환 (브라우저 위치와 맞는 컨테이너만) */
+  autoLayout?: boolean;
 }
 
 export type UIToMainMessage = ImportDomMessage;

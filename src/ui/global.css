@@ -71,6 +71,22 @@ body {
   cursor: not-allowed;
 }
 
+/* ── 옵션 ──────────────────────────────────────────── */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--figma-color-text-secondary, #666);
+  cursor: pointer;
+  user-select: none;
+}
+
+.option input {
+  margin: 0;
+  accent-color: var(--figma-color-bg-brand, #0d99ff);
+}
+
 /* ── 텍스트 영역 ────────────────────────────────────── */
 .textarea-wrap {
   flex: 1;

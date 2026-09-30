@@ -399,6 +399,7 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     overflowY: cs.overflowY,
     display: cs.display,
     flexDirection: cs.flexDirection,
+    flexWrap: cs.flexWrap,
     alignItems: cs.alignItems,
     justifyContent: cs.justifyContent,
     rowGap: pf(cs.rowGap),

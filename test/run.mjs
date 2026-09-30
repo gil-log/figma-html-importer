@@ -11,6 +11,7 @@
  *   node test/run.mjs --dist <dir>    # 다른 빌드 결과물로 실행 (수정 전 빌드와 비교)
  *   node test/run.mjs --grep br --dump  # 생성된 노드 트리를 요약 출력
  *   node test/run.mjs --html page.html --width 375   # 임의 HTML 파일을 가져와 트리만 출력
+ *   node test/run.mjs --html page.html --autolayout  # Auto Layout 옵션을 켜고 가져오기
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -34,6 +35,7 @@ const dump = args.includes('--dump');
 function summarize(n, depth = 0, out = []) {
   const r = (v) => Math.round(v * 10) / 10;
   let line = `${'  '.repeat(depth)}${n.type} "${n.name}" (${r(n.x)},${r(n.y)} ${r(n.width)}x${r(n.height)})`;
+  if (n.layoutMode && n.layoutMode !== 'NONE') line += ` [${n.layoutMode} gap=${n.itemSpacing} ${n.primaryAxisAlignItems}/${n.counterAxisAlignItems}]`;
   if (n.type === 'TEXT') line += ` ${JSON.stringify(n.characters)} ${n.textAutoResize} ${n.textAlignHorizontal} ${n.fontName.family}/${n.fontName.style}`;
   if (n.type !== 'TEXT' && n.fills?.length) line += ` fills=[${n.fills.map((f) => f.type === 'IMAGE' ? `IMAGE:${f.scaleMode}` : f.type).join(',')}]`;
   if (n.svg) line += ` ${n.svg.length > 240 ? n.svg.slice(0, 240) + '…' : n.svg}`;
@@ -65,6 +67,7 @@ const selected = htmlFile
     id: path.basename(htmlFile),
     title: '임의 HTML 가져오기',
     width: Number(argOf('--width') || 1440),
+    options: { autoLayout: args.includes('--autolayout') },
     html: fs.readFileSync(htmlFile, 'utf8'),
     check: (res) => console.log(res.roots.map((r) => summarize(r)).join('\n')),
   }]

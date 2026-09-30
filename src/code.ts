@@ -4,7 +4,7 @@
  * UI로부터 DomNodeData 트리를 받아 Figma API로 노드를 재귀 생성한다.
  * DOM API 없음, Figma API만 사용 가능.
  */
-import type { DomNodeData, DomStyleData, ImageAsset, UIToMainMessage, MainToUIMessage } from './types';
+import type { DomNodeData, DomStyleData, ImageAsset, ImportOptions, UIToMainMessage, MainToUIMessage } from './types';
 
 figma.showUI(__html__, { width: 400, height: 580, themeColors: true });
 
@@ -971,6 +971,125 @@ function applyRotation(n: FrameNode | RectangleNode, node: DomNodeData): void {
   n.relativeTransform = [[cos, -sin, x], [sin, cos, y]];
 }
 
+// ─── Auto Layout (옵션) ───────────────────────────────────────
+
+let importOptions: ImportOptions = {};
+
+interface BuiltChild {
+  data: DomNodeData;
+  scene: SceneNode;
+}
+
+const AUTO_LAYOUT_TOLERANCE = 1.5;
+
+/**
+ * flex 컨테이너 → Auto Layout.
+ * Figma 는 자식 크기·padding·gap·정렬로 위치를 다시 계산하므로, 그렇게 계산한 위치가
+ * 브라우저 위치와 허용 오차 안에서 같은 컨테이너만 변환한다 (margin·flex-wrap·space-around 등은 그대로 둔다).
+ * 절대위치 자식은 ABSOLUTE 로 제자리에 둔다.
+ */
+function tryAutoLayout(frame: FrameNode, node: DomNodeData, built: BuiltChild[]): boolean {
+  const s = node.style;
+  if (!/^(inline-)?flex$/.test(s.display) || (s.flexWrap && s.flexWrap !== 'nowrap')) return false;
+  if (s.flexDirection !== 'row' && s.flexDirection !== 'column') return false;
+  const horizontal = s.flexDirection === 'row';
+  const isAbsolute = (d: DomNodeData) => d.style.position === 'absolute' || d.style.position === 'fixed';
+  const flow = built.filter((b) => !isAbsolute(b.data));
+  const absolute = built.filter((b) => isAbsolute(b.data));
+  if (flow.length === 0 || flow.some((b) => b.data.transform)) return false;
+
+  const pos = (n: SceneNode) => (horizontal ? n.x : n.y);
+  const crossPos = (n: SceneNode) => (horizontal ? n.y : n.x);
+  const size = (n: SceneNode) => (horizontal ? n.width : n.height);
+  const crossSize = (n: SceneNode) => (horizontal ? n.height : n.width);
+  flow.sort((a, b) => pos(a.scene) - pos(b.scene));
+
+  const pad = {
+    left: s.borderLeftWidth + s.paddingLeft,
+    right: s.borderRightWidth + s.paddingRight,
+    top: s.borderTopWidth + s.paddingTop,
+    bottom: s.borderBottomWidth + s.paddingBottom,
+  };
+  const start = horizontal ? pad.left : pad.top;
+  const inner = (horizontal ? frame.width : frame.height) - start - (horizontal ? pad.right : pad.bottom);
+  const crossStart = horizontal ? pad.top : pad.left;
+  const crossInner = (horizontal ? frame.height : frame.width) - crossStart - (horizontal ? pad.bottom : pad.right);
+  const gap = horizontal ? s.columnGap : s.rowGap;
+  const sum = flow.reduce((acc, b) => acc + size(b.scene), 0);
+  const total = sum + gap * (flow.length - 1);
+
+  let primary: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
+  let spacing = gap;
+  let cursor = start;
+  switch (s.justifyContent) {
+    case 'normal': case 'flex-start': case 'start': case 'left':
+      primary = 'MIN';
+      break;
+    case 'center':
+      primary = 'CENTER';
+      cursor = start + (inner - total) / 2;
+      break;
+    case 'flex-end': case 'end': case 'right':
+      primary = 'MAX';
+      cursor = start + inner - total;
+      break;
+    case 'space-between':
+      primary = flow.length > 1 ? 'SPACE_BETWEEN' : 'MIN';
+      if (flow.length > 1) spacing = (inner - sum) / (flow.length - 1);
+      break;
+    default:
+      return false;
+  }
+  for (const b of flow) {
+    if (Math.abs(pos(b.scene) - cursor) > AUTO_LAYOUT_TOLERANCE) return false;
+    cursor += size(b.scene) + spacing;
+  }
+
+  let counter: 'MIN' | 'CENTER' | 'MAX';
+  const stretched: SceneNode[] = [];
+  switch (s.alignItems) {
+    case 'flex-start': case 'start': case 'self-start': counter = 'MIN'; break;
+    case 'center': counter = 'CENTER'; break;
+    case 'flex-end': case 'end': case 'self-end': counter = 'MAX'; break;
+    case 'normal': case 'stretch': counter = 'MIN'; break;
+    default: return false;
+  }
+  for (const b of flow) {
+    const c = crossSize(b.scene);
+    const expected = counter === 'CENTER' ? crossStart + (crossInner - c) / 2
+      : counter === 'MAX' ? crossStart + crossInner - c
+        : crossStart;
+    if (Math.abs(crossPos(b.scene) - expected) > AUTO_LAYOUT_TOLERANCE) return false;
+    if ((s.alignItems === 'normal' || s.alignItems === 'stretch') && Math.abs(c - crossInner) <= AUTO_LAYOUT_TOLERANCE) {
+      stretched.push(b.scene);
+    }
+  }
+
+  const absolutePositions = absolute.map((b) => ({ n: b.scene as FrameNode, x: b.scene.x, y: b.scene.y }));
+  frame.layoutMode = horizontal ? 'HORIZONTAL' : 'VERTICAL';
+  frame.primaryAxisSizingMode = 'FIXED';
+  frame.counterAxisSizingMode = 'FIXED';
+  frame.paddingLeft = pad.left;
+  frame.paddingRight = pad.right;
+  frame.paddingTop = pad.top;
+  frame.paddingBottom = pad.bottom;
+  frame.itemSpacing = primary === 'SPACE_BETWEEN' ? 0 : gap;
+  frame.primaryAxisAlignItems = primary;
+  frame.counterAxisAlignItems = counter;
+  for (const b of flow) frame.appendChild(b.scene);
+  for (const { n, x, y } of absolutePositions) {
+    frame.appendChild(n);
+    n.layoutPositioning = 'ABSOLUTE';
+    n.x = x;
+    n.y = y;
+  }
+  for (const n of stretched) {
+    if (horizontal) (n as FrameNode).layoutSizingVertical = 'FILL';
+    else (n as FrameNode).layoutSizingHorizontal = 'FILL';
+  }
+  return true;
+}
+
 // ─── 재귀 노드 빌더 ───────────────────────────────────────────
 
 let frameCount = 0;
@@ -1126,13 +1245,19 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     applyFrameStyle(frame, style, w, h);
   }
 
-  // 자식 재귀 처리
+  // 자식 재귀 처리 (Auto Layout 검증을 위해 자식 데이터 ↔ 만든 레이어를 짝지어 둔다)
+  const built: BuiltChild[] = [];
   for (const child of children) {
+    const before = frame.children.length;
     try {
       await buildTree(child, frame);
     } catch (err) {
       console.error('[html-importer] buildTree error:', err);
     }
+    if (frame.children.length === before + 1) built.push({ data: child, scene: frame.children[before] });
+  }
+  if (importOptions.autoLayout && !node.collapsed && built.length === children.length) {
+    tryAutoLayout(frame, node, built);
   }
 
   if (!node.collapsed) applyEffects(frame, style);
@@ -1169,6 +1294,7 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
   textCount = 0;
   imageAssets = msg.images ?? {};
   imageHashes.clear();
+  importOptions = msg.options ?? {};
 
   try {
     const data = msg.data;
@@ -1192,13 +1318,17 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
     } else {
       applyFrameStyle(rootFrame, data.style, data.rect.width, data.rect.height);
       // 자식 노드 재귀 생성
+      const built: BuiltChild[] = [];
       for (const child of data.children) {
+        const before = rootFrame.children.length;
         try {
           await buildTree(child, rootFrame);
         } catch (err) {
           console.error('[html-importer] child error:', err);
         }
+        if (rootFrame.children.length === before + 1) built.push({ data: child, scene: rootFrame.children[before] });
       }
+      if (importOptions.autoLayout && built.length === data.children.length) tryAutoLayout(rootFrame, data, built);
       // 페이지 밖으로 넘친 자식(절대위치 요소 등)까지 루트가 감싸도록 늘린다 (루트가 자르지 않을 때만)
       if (!rootFrame.clipsContent) {
         const { right, bottom } = contentExtent(rootFrame);
