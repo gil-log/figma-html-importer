@@ -1158,6 +1158,7 @@ function layerName(el: Element, tag: string): string | undefined {
  * 형제 레이어를 CSS 그리기 순서로 정렬 (뒤에 올수록 위에 그려진다).
  * 음수 z-index → 일반 흐름 요소·글자 → z-index auto/0 인 positioned 요소 → 양수 z-index, 같은 층은 DOM 순서.
  * flex·grid 자식은 position 이 없어도 z-index 가 적용된다.
+ * 순서가 바뀌는 형제끼리 실제로 겹칠 때만 재배열하고, 아니면 레이어 패널이 문서 흐름대로 보이게 DOM 순서를 둔다.
  */
 function sortByPaintOrder(children: DomNodeData[], parentDisplay: string): DomNodeData[] {
   const flexOrGrid = /flex|grid/.test(parentDisplay);
@@ -1168,10 +1169,20 @@ function sortByPaintOrder(children: DomNodeData[], parentDisplay: string): DomNo
     if (isNaN(z) || z === 0) return positioned ? [2, 0] : [1, 0];
     return z < 0 ? [0, z] : [3, z];
   };
-  return children
+  const sorted = children
     .map((c, i) => ({ c, i, k: layerOf(c) }))
-    .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i)
-    .map((x) => x.c);
+    .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i);
+  const overlaps = (a: DomNodeData['rect'], b: DomNodeData['rect']) =>
+    a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
+  const pos = new Map(sorted.map((x, order) => [x.c, order]));
+  for (let i = 0; i < children.length; i++) {
+    for (let j = i + 1; j < children.length; j++) {
+      if (pos.get(children[i])! > pos.get(children[j])! && overlaps(children[i].rect, children[j].rect)) {
+        return sorted.map((x) => x.c);
+      }
+    }
+  }
+  return children;
 }
 
 /**

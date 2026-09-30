@@ -1450,4 +1450,11 @@ export const cases = [
     html: '<div><div class="-z-10 -top-3" style="height:10px"></div><svg data-lucide="calendar" class="lucide" width="10" height="10"><rect width="10" height="10"/></svg></div>',
     check: ({ root }, t) => t.eq(root.children.map((c) => c.name), ['div', 'icon · calendar'], 'names'),
   },
+  {
+    id: 'dom-order-without-overlap',
+    title: '서로 겹치지 않는 형제는 문서 순서를 유지한다 (positioned 요소라도)',
+    width: 375,
+    html: '<div><header style="position:relative;height:20px;background:red"></header><section style="height:20px;background:blue"></section><footer style="position:sticky;top:0;height:20px;background:lime"></footer></div>',
+    check: ({ root }, t) => t.eq(root.children.map((c) => JSON.stringify(solid(c))), ['[255,0,0]', '[0,0,255]', '[0,255,0]'], 'DOM order'),
+  },
 ];

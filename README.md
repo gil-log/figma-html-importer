@@ -125,7 +125,8 @@ text nodes, and vectors.
   The imported frame takes the document `<title>`.
 - **Stacking order** — sibling layers are ordered the way CSS paints them: negative `z-index`, then
   in-flow content, then positioned elements, then positive `z-index` (flex and grid items honor
-  `z-index` without `position`), so overlays declared first still land on top.
+  `z-index` without `position`), so overlays declared first still land on top. Siblings that do not
+  overlap keep document order, so the layers panel reads top to bottom like the page.
 - **Rotation** — elements rotated with `transform` or the `rotate` property (rotated chevrons,
   tilted badges) keep their real size and are rotated in Figma around the same `transform-origin`.
 - **Web components** — content inside open shadow roots (including declarative
