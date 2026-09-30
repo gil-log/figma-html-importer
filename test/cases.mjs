@@ -951,6 +951,25 @@ export const cases = [
       if (star && label) t.near(star.ax, label.ax + label.width + 2, 3, 'star right after label');
     },
   },
+  {
+    id: 'fixture-landing',
+    title: 'Tailwind·Google Fonts·lucide 아이콘을 쓴 랜딩 페이지가 오류 없이 문서 순서·그라디언트 글자·아이콘·FAQ 까지 들어간다',
+    width: 1440,
+    html: fixture('landing.html'),
+    check: ({ root, done }, t) => {
+      t.eq(done?.failedCount, 0, 'no failures');
+      t.eq(root.name, 'SANDI Office', 'title');
+      const body = root.children[0];
+      t.eq(body?.children?.map((c) => c.name), ['nav', 'header', 'section', 'section', 'section', 'footer'], 'document order');
+      const h1 = findTextIncl(root, '한 곳에서');
+      t.ok(h1?.ranges?.some((r) => r.kind === 'fills' && r.value?.[0]?.type === 'GRADIENT_LINEAR'), 'gradient range in headline');
+      t.ok(all(root, (n) => n.name.startsWith('icon · ')).length >= 7, 'lucide icons named');
+      t.ok(imageFill(find(root, (n) => n.type === 'RECTANGLE' && n.name.startsWith('img'))), 'hero image');
+      t.ok(findText(root, '▾') && findText(root, '▸') && !findText(root, '숨겨진 답변'), 'FAQ details');
+      t.ok(findText(root, '인기'), 'pricing badge');
+    },
+  },
+
   // ── 폼 ───────────────────────────────────────────────────
   {
     id: 'form-checkbox',

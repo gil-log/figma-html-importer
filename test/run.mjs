@@ -69,7 +69,10 @@ const selected = htmlFile
     width: Number(argOf('--width') || 1440),
     options: { autoLayout: args.includes('--autolayout') },
     html: fs.readFileSync(htmlFile, 'utf8'),
-    check: (res) => console.log(res.roots.map((r) => summarize(r)).join('\n')),
+    check: (res) => {
+      console.log(res.roots.map((r) => summarize(r)).join('\n'));
+      console.log(`failed: ${res.done?.failedCount ?? '?'}${res.done?.firstError ? ` (${res.done.firstError})` : ''}`);
+    },
   }]
   : cases.filter((c) => !grep || c.id.includes(grep) || c.title.includes(grep));
 // 설치된 Chrome 을 우선 사용하고, 없으면 Playwright 브라우저(npx playwright install chromium)로 실행
