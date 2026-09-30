@@ -144,10 +144,13 @@ function weightToFigmaStyle(weight: string, italic: boolean): string {
   else if (w >= 700) style = 'Bold';
   else if (w >= 600) style = 'SemiBold';
   else if (w >= 500) style = 'Medium';
+  else if (w >= 400) style = 'Regular';
   else if (w >= 300) style = 'Light';
   else if (w >= 200) style = 'ExtraLight';
   else if (w >= 100) style = 'Thin';
-  return italic ? style + ' Italic' : style;
+  // 400 이탤릭은 Figma 폰트 대부분이 'Regular Italic' 이 아니라 'Italic' 으로 부른다
+  if (italic) return style === 'Regular' ? 'Italic' : style + ' Italic';
+  return style;
 }
 
 // Figma에 없는 폰트 스타일은 가까운 것으로 폴백
@@ -174,9 +177,10 @@ async function loadBestFont(family: string, style: string): Promise<FontName> {
     .replace('Extra Bold', 'ExtraBold')
     .replace('Extra Light', 'ExtraLight');
   if (compact !== style) candidates.push({ family, style: compact });
+  if (style === 'Italic') candidates.push({ family, style: 'Regular Italic' });
 
   candidates.push(
-    { family, style: style.replace(' Italic', '') },
+    { family, style: style === 'Italic' ? 'Regular' : style.replace(' Italic', '') },
     { family, style: 'Regular' },
   );
 
