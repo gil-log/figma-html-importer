@@ -5,6 +5,7 @@
 import { find, findText, findTextIncl, texts, solid, hasSolid, gradientHandles } from './helpers.mjs';
 
 const TW = '<script src="https://cdn.tailwindcss.com"></script>';
+const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const frameBy = (root, pred) => find(root, (n) => n.type === 'FRAME' && pred(n));
 const solidFrame = (root, rgb) => frameBy(root, (n) => hasSolid(n, rgb));
 
@@ -246,6 +247,17 @@ export const cases = [
     width: 375,
     html: '<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="red"/></svg>',
     check: ({ root }, t) => t.ok(find(root, (n) => (n.svg || '').includes('<circle')), 'svg node exists'),
+  },
+  {
+    id: 'root-img',
+    title: '이미지 하나만 붙여넣어도 이미지 크기의 레이어가 들어간다',
+    width: 375,
+    html: `<img src="${PNG_1PX}" style="width:40px;height:30px;display:block">`,
+    check: ({ root }, t) => {
+      const img = find(root, (n) => n.type === 'RECTANGLE');
+      t.near(img?.width, 40, 0.5, 'width');
+      t.near(img?.height, 30, 0.5, 'height');
+    },
   },
 
   // ── 렌더링 환경 ───────────────────────────────────────────

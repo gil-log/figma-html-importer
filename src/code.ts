@@ -838,24 +838,29 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
     rootFrame.name = 'HTML Import';
     rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
 
-    // 루트 스타일 적용
-    applyFrameStyle(rootFrame, data.style, data.rect.width, data.rect.height);
-
     // 페이지에 추가 후 뷰포트 중앙 배치
     figma.currentPage.appendChild(rootFrame);
     rootFrame.x = Math.round(figma.viewport.center.x - rootFrame.width / 2);
     rootFrame.y = Math.round(figma.viewport.center.y - rootFrame.height / 2);
 
-    // 자식 노드 재귀 생성
-    for (const child of data.children) {
-      try {
-        await buildTree(child, rootFrame);
-      } catch (err) {
-        console.error('[html-importer] child error:', err);
+    const isLeaf = (!!data.text && data.children.length === 0) || data.tagName === 'svg' || data.tagName === 'img';
+    if (isLeaf) {
+      // 버튼·아이콘처럼 요소 하나만 붙여넣은 경우: 루트 프레임 안에 요소 자신을 (0,0) 에 만든다
+      rootFrame.fills = [];
+      rootFrame.clipsContent = false;
+      await buildTree({ ...data, rect: { ...data.rect, x: 0, y: 0 } }, rootFrame);
+    } else {
+      applyFrameStyle(rootFrame, data.style, data.rect.width, data.rect.height);
+      // 자식 노드 재귀 생성
+      for (const child of data.children) {
+        try {
+          await buildTree(child, rootFrame);
+        } catch (err) {
+          console.error('[html-importer] child error:', err);
+        }
       }
+      applyEffects(rootFrame, data.style);
     }
-
-    applyEffects(rootFrame, data.style);
 
     // 선택 후 줌
     figma.currentPage.selection = [rootFrame];
