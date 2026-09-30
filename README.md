@@ -67,6 +67,9 @@ text nodes, and vectors.
   CSS font matching does.
 - **Italic, line-height, letter-spacing, text-align, and text-transform** all preserved
   (`uppercase` / `lowercase` / `capitalize` become Figma text case).
+- **Underline details and outlined text** — underline/strike-through style (`wavy`, `dotted`),
+  color, thickness, and `text-underline-offset` carry over, including underlines inherited from an
+  ancestor link; `-webkit-text-stroke` becomes a text stroke.
 - **Styled inline runs** — inline `<strong>`, `<em>`, `<a>`, `<span>`, … inside a paragraph become
   character-range overrides for weight, italic, font family, size, color, underline/strike-through,
   text case, and letter spacing.

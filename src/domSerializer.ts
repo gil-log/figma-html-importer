@@ -452,6 +452,12 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     textAlign: cs.textAlign,
     letterSpacing: cs.letterSpacing,
     textDecoration: cs.textDecorationLine || cs.textDecoration,
+    textDecorationStyle: cs.textDecorationStyle,
+    textDecorationColor: normalizeCssColor(cs.textDecorationColor),
+    textDecorationThickness: cs.textDecorationThickness,
+    textUnderlineOffset: cs.textUnderlineOffset,
+    textStrokeWidth: pf((cs as any).webkitTextStrokeWidth),
+    textStrokeColor: normalizeCssColor((cs as any).webkitTextStrokeColor || ''),
     textTransform: cs.textTransform,
     direction: cs.direction,
     borderTopLeftRadius: pf(cs.borderTopLeftRadius),
@@ -605,18 +611,34 @@ function wsMode(cs: CSSStyleDeclaration): WsMode {
 
 type SegStyle = Omit<TextSegment, 'text'>;
 const SEG_KEYS: (keyof SegStyle)[] = [
-  'fontFamily', 'fontWeight', 'fontStyle', 'fontSize', 'color', 'textDecoration', 'textTransform', 'letterSpacing',
+  'fontFamily', 'fontWeight', 'fontStyle', 'fontSize', 'color', 'textDecoration', 'textDecorationStyle',
+  'textDecorationColor', 'textDecorationThickness', 'textUnderlineOffset', 'textTransform', 'letterSpacing',
 ];
 
-/** text-decoration 은 상속되지 않지만 자손 글자에도 그려진다 → 조상까지 합쳐서 판단 */
-function effectiveDecoration(el: Element, win: Window): string {
+type Decoration = Pick<TextSegment, 'textDecoration' | 'textDecorationStyle' | 'textDecorationColor' |
+  'textDecorationThickness' | 'textUnderlineOffset'>;
+
+/**
+ * text-decoration 은 상속되지 않지만 자손 글자에도 그려진다 → 조상까지 합쳐서 판단.
+ * 선 종류는 조상들을 합치고, 모양·색·굵기·간격은 선을 선언한 가장 가까운 요소 것을 쓴다.
+ */
+function decorationOf(el: Element, win: Window): Decoration {
   const lines = new Set<string>();
+  let owner: CSSStyleDeclaration | null = null;
   for (let e: Element | null = el; e; e = e.parentElement) {
-    const line = win.getComputedStyle(e).textDecorationLine || '';
+    const cs = win.getComputedStyle(e);
+    const line = cs.textDecorationLine || '';
     if (line.includes('underline')) lines.add('underline');
     if (line.includes('line-through')) lines.add('line-through');
+    if (!owner && (line.includes('underline') || line.includes('line-through'))) owner = cs;
   }
-  return Array.from(lines).join(' ') || 'none';
+  return {
+    textDecoration: Array.from(lines).join(' ') || 'none',
+    textDecorationStyle: owner?.textDecorationStyle ?? 'solid',
+    textDecorationColor: owner ? normalizeCssColor(owner.textDecorationColor) : '',
+    textDecorationThickness: owner?.textDecorationThickness ?? 'auto',
+    textUnderlineOffset: owner?.textUnderlineOffset ?? 'auto',
+  };
 }
 
 function segStyleOf(el: Element, win: Window): SegStyle {
@@ -627,7 +649,7 @@ function segStyleOf(el: Element, win: Window): SegStyle {
     fontStyle: cs.fontStyle,
     fontSize: pf(cs.fontSize) || 14,
     color: textColor(cs),
-    textDecoration: effectiveDecoration(el, win),
+    ...decorationOf(el, win),
     textTransform: cs.textTransform,
     letterSpacing: cs.letterSpacing,
   };
@@ -856,7 +878,7 @@ function textRunNode(parent: Element, parentCs: CSSStyleDeclaration, parentRect:
       height: round2(m.box.bottom - m.box.top),
     },
     visible: true,
-    style: plainTextStyle(parentCs),
+    style: { ...plainTextStyle(parentCs), ...decorationOf(parent, win) },
     children: [],
   };
   const cb = contentBox(parentCs, parentRect);
@@ -1220,6 +1242,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
         ? { x: m.box.left - origin.left, width: m.box.right - m.box.left }
         : { x: box.left + cb.x - origin.left, width: cb.width };
       fillText(node, built, m, origin, wrap, truncate);
+      Object.assign(node.style, decorationOf(el, win));
       // 여러 줄 말줄임: Range 는 잘려 숨은 줄까지 잡으므로 보이는 줄만큼을 content 위쪽부터 글자 영역으로 쓴다
       if (truncate && truncate.maxLines > 1 && node.textBox) {
         const lineH = parseFloat(cs.lineHeight) || (m.box.bottom - m.box.top) / m.lines;

@@ -938,6 +938,25 @@ function toTextDecoration(decoration: string | undefined): TextDecoration {
   return 'NONE';
 }
 
+function toDecorationStyle(v: string | undefined): TextDecorationStyle | null {
+  if (v === 'wavy') return 'WAVY';
+  if (v === 'dotted' || v === 'dashed') return 'DOTTED';
+  return null; // solid·double 은 기본 모양
+}
+
+/** text-decoration-thickness / text-underline-offset 의 px 값 (auto·from-font 는 null) */
+function toDecorationLength(v: string | undefined): { value: number; unit: 'PIXELS' } | null {
+  const m = (v || '').match(/^(-?[\d.]+)px$/);
+  return m ? { value: parseFloat(m[1]), unit: 'PIXELS' } : null;
+}
+
+/** 글자색과 다른 밑줄 색만 따로 지정한다 (같으면 Figma 기본 AUTO = 글자색) */
+function toDecorationColor(color: string | undefined, textColor: string): TextDecorationColor | null {
+  if (!color || color === textColor) return null;
+  const paint = toSolidPaint(color);
+  return paint ? { value: paint } : null;
+}
+
 function toLetterSpacing(letterSpacing: string | undefined): LetterSpacing | null {
   if (!letterSpacing || letterSpacing === 'normal') return null;
   const v = parseFloat(letterSpacing);
@@ -966,6 +985,17 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
       if (paint) t.setRangeFills(start, end, [paint]);
     }
     if (seg.textDecoration) t.setRangeTextDecoration(start, end, toTextDecoration(seg.textDecoration));
+    // 밑줄 세부 속성은 밑줄·취소선이 있는 구간에만 둘 수 있다
+    if (toTextDecoration(seg.textDecoration ?? style.textDecoration) !== 'NONE') {
+      const ds = toDecorationStyle(seg.textDecorationStyle);
+      if (ds) t.setRangeTextDecorationStyle(start, end, ds);
+      const th = toDecorationLength(seg.textDecorationThickness);
+      if (th) t.setRangeTextDecorationThickness(start, end, th);
+      const off = toDecorationLength(seg.textUnderlineOffset);
+      if (off) t.setRangeTextDecorationOffset(start, end, off);
+      const dc = toDecorationColor(seg.textDecorationColor, seg.color ?? style.color);
+      if (dc) t.setRangeTextDecorationColor(start, end, dc);
+    }
     if (seg.textTransform) t.setRangeTextCase(start, end, toTextCase(seg.textTransform));
     if (seg.letterSpacing) {
       t.setRangeLetterSpacing(start, end, toLetterSpacing(seg.letterSpacing) ?? { value: 0, unit: 'PIXELS' });
@@ -998,7 +1028,26 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number, layerEf
   const ls = toLetterSpacing(style.letterSpacing);
   if (ls) t.letterSpacing = ls;
   const decoration = toTextDecoration(style.textDecoration);
-  if (decoration !== 'NONE') t.textDecoration = decoration;
+  if (decoration !== 'NONE') {
+    t.textDecoration = decoration;
+    const ds = toDecorationStyle(style.textDecorationStyle);
+    if (ds) t.textDecorationStyle = ds;
+    const th = toDecorationLength(style.textDecorationThickness);
+    if (th) t.textDecorationThickness = th;
+    const off = decoration === 'UNDERLINE' ? toDecorationLength(style.textUnderlineOffset) : null;
+    if (off) t.textDecorationOffset = off;
+    const dc = toDecorationColor(style.textDecorationColor, style.color);
+    if (dc) t.textDecorationColor = dc;
+  }
+  // -webkit-text-stroke → 글자 외곽선 (CSS 처럼 윤곽선 가운데에 그린다)
+  if (style.textStrokeWidth > 0) {
+    const strokePaint = toSolidPaint(style.textStrokeColor);
+    if (strokePaint) {
+      t.strokes = [strokePaint];
+      t.strokeWeight = style.textStrokeWidth;
+      t.strokeAlign = 'CENTER';
+    }
+  }
   const textCase = toTextCase(style.textTransform);
   if (textCase !== 'ORIGINAL') t.textCase = textCase;
   const align = toTextAlign(style.textAlign, style.direction);

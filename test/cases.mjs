@@ -1299,4 +1299,49 @@ export const cases = [
       t.ok(findTextIncl(root, 'light'), 'slotted light text');
     },
   },
+  {
+    id: 'text-decoration-details',
+    title: '밑줄의 색·모양(wavy)·굵기·간격이 들어간다',
+    width: 375,
+    html: '<div><a href="#" style="display:block;text-decoration:underline wavy rgb(255, 0, 0) 2px;text-underline-offset:4px">fancy</a></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'fancy');
+      t.eq(n?.textDecorationStyle, 'WAVY', 'style');
+      t.eq(n?.textDecorationThickness, { value: 2, unit: 'PIXELS' }, 'thickness');
+      t.eq(n?.textDecorationOffset, { value: 4, unit: 'PIXELS' }, 'offset');
+      t.eq(solid({ fills: [n?.textDecorationColor?.value].filter(Boolean) }), [255, 0, 0], 'color');
+    },
+  },
+  {
+    id: 'decoration-inline-link',
+    title: '문단 안 링크의 밑줄 색·굵기는 그 구간에만 들어간다',
+    width: 375,
+    html: '<div style="width:300px"><p>Read <a href="#" style="color:inherit;text-decoration:underline;text-decoration-color:rgb(255, 0, 0);text-decoration-thickness:2px">more</a></p></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Read more');
+      if (!t.ok(n, `texts: ${JSON.stringify(texts(root).map((x) => x.characters))}`)) return;
+      const has = (kind) => n.ranges.some((r) => r.kind === kind && r.start === 5 && r.end === 9);
+      t.ok(has('textDecoration'), 'underline range');
+      t.ok(has('textDecorationColor'), 'color range');
+      t.ok(has('textDecorationThickness'), 'thickness range');
+    },
+  },
+  {
+    id: 'decoration-inherited',
+    title: '밑줄 있는 조상 안의 블록 글자에도 밑줄이 들어간다',
+    width: 375,
+    html: '<div><a href="#" style="display:block;text-decoration:underline"><span style="display:block">inner</span></a></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'inner')?.textDecoration, 'UNDERLINE', 'decoration'),
+  },
+  {
+    id: 'text-stroke',
+    title: '-webkit-text-stroke 외곽선 글자는 텍스트 테두리로 들어간다',
+    width: 375,
+    html: '<div><p style="-webkit-text-stroke:1px rgb(255, 0, 0);color:transparent;font-size:32px;margin:0">OUTLINE</p></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'OUTLINE');
+      t.eq(solid({ fills: n?.strokes }), [255, 0, 0], 'stroke color');
+      t.eq(n?.strokeWeight, 1, 'stroke weight');
+    },
+  },
 ];

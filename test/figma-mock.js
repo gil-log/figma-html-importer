@@ -106,15 +106,21 @@
       textAutoResize: 'NONE', textAlignHorizontal: 'LEFT', textAlignVertical: 'TOP',
       lineHeight: { unit: 'AUTO' }, letterSpacing: { unit: 'PERCENT', value: 0 },
       textDecoration: 'NONE', textCase: 'ORIGINAL', textTruncation: 'DISABLED', maxLines: null,
+      textDecorationStyle: null, textDecorationOffset: null, textDecorationThickness: null, textDecorationColor: null,
     };
     n.ranges = [];
     const guarded = ['characters', 'fontSize', 'textAutoResize', 'textAlignHorizontal', 'textAlignVertical',
-      'lineHeight', 'letterSpacing', 'textDecoration', 'textCase', 'textTruncation', 'maxLines'];
+      'lineHeight', 'letterSpacing', 'textDecoration', 'textCase', 'textTruncation', 'maxLines',
+      'textDecorationStyle', 'textDecorationOffset', 'textDecorationThickness', 'textDecorationColor'];
     for (const p of guarded) {
       Object.defineProperty(n, p, {
         get() { return s[p]; },
         set(v) {
           assertLoaded(s.fontName, 'set ' + p);
+          // Figma: 밑줄 세부 속성은 밑줄·취소선이 있을 때만 의미가 있다
+          if (p.startsWith('textDecoration') && p !== 'textDecoration' && s.textDecoration === 'NONE') {
+            throw new Error(`${p} requires textDecoration`);
+          }
           // 테스트용 실패 주입: 이 글자를 넣으면 Figma 가 거부한 것처럼 예외
           if (p === 'characters' && window.__failText && v === window.__failText) throw new Error('injected failure');
           s[p] = v;
@@ -165,6 +171,10 @@
     n.setRangeTextCase = range('textCase');
     n.setRangeLetterSpacing = range('letterSpacing');
     n.setRangeLineHeight = range('lineHeight');
+    n.setRangeTextDecorationStyle = range('textDecorationStyle');
+    n.setRangeTextDecorationThickness = range('textDecorationThickness');
+    n.setRangeTextDecorationOffset = range('textDecorationOffset');
+    n.setRangeTextDecorationColor = range('textDecorationColor');
     return n;
   }
 
@@ -247,7 +257,8 @@
     if (n._rt) o.relativeTransform = n._rt;
     if (n.type === 'TEXT') {
       for (const p of ['characters', 'fontName', 'fontSize', 'textAutoResize', 'textAlignHorizontal', 'lineHeight',
-        'letterSpacing', 'textDecoration', 'textCase', 'textTruncation', 'maxLines', 'ranges']) o[p] = n[p];
+        'letterSpacing', 'textDecoration', 'textCase', 'textTruncation', 'maxLines', 'ranges', 'textDecorationStyle',
+        'textDecorationOffset', 'textDecorationThickness', 'textDecorationColor', 'strokeWeight', 'strokeAlign']) o[p] = n[p];
     }
     o.children = n.children.map(serialize);
     return o;

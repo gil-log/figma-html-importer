@@ -18,6 +18,12 @@ export interface DomStyleData {
   textAlign: string;
   letterSpacing: string;
   textDecoration: string;
+  textDecorationStyle: string;
+  textDecorationColor: string;
+  textDecorationThickness: string;
+  textUnderlineOffset: string;
+  textStrokeWidth: number;
+  textStrokeColor: string;
   textTransform: string;
   direction: string;
 
@@ -80,6 +86,10 @@ export interface TextSegment {
   fontSize?: number;
   color?: string;
   textDecoration?: string;
+  textDecorationStyle?: string;
+  textDecorationColor?: string;
+  textDecorationThickness?: string;
+  textUnderlineOffset?: string;
   textTransform?: string;
   letterSpacing?: string;
 }
