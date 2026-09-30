@@ -113,12 +113,14 @@ function normalizeColorsIn(value: string): string {
  * → 파싱 실패를 막기 위해 개별 면에서 non-empty/non-none/non-transparent 값을 우선 추출.
  */
 function effectiveBorderColor(cs: CSSStyleDeclaration): string {
-  const sides = [cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor];
-  for (const v of sides) {
-    const n = normalizeCssColor(v);
-    if (n && n !== 'transparent') return n;
-  }
-  return normalizeCssColor(cs.borderColor);
+  // 폭이 있는 면 중 가장 두꺼운 면의 색 (폭 0 인 면의 color 는 초기값 currentColor 라 의미가 없다)
+  const sides = [
+    [cs.borderTopWidth, cs.borderTopColor], [cs.borderRightWidth, cs.borderRightColor],
+    [cs.borderBottomWidth, cs.borderBottomColor], [cs.borderLeftWidth, cs.borderLeftColor],
+  ].map(([w, c]) => ({ w: pf(w), c: normalizeCssColor(c) }))
+    .filter((side) => side.w > 0 && side.c && side.c !== 'transparent')
+    .sort((a, b) => b.w - a.w);
+  return sides[0]?.c ?? normalizeCssColor(cs.borderColor);
 }
 
 function effectiveBorderStyle(cs: CSSStyleDeclaration): string {
@@ -415,6 +417,10 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     borderBottomWidth: pf(cs.borderBottomWidth),
     borderLeftWidth: pf(cs.borderLeftWidth),
     borderColor: effectiveBorderColor(cs),
+    borderTopColor: normalizeCssColor(cs.borderTopColor),
+    borderRightColor: normalizeCssColor(cs.borderRightColor),
+    borderBottomColor: normalizeCssColor(cs.borderBottomColor),
+    borderLeftColor: normalizeCssColor(cs.borderLeftColor),
     borderStyle: effectiveBorderStyle(cs),
     // opacity:0 도 그대로 살려야 하므로 pf() || 1 로 쓰지 않는다
     opacity: cs.opacity === '' ? 1 : parseFloat(cs.opacity),
@@ -742,6 +748,10 @@ function plainTextStyle(cs: CSSStyleDeclaration): DomStyleData {
     borderBottomWidth: 0,
     borderLeftWidth: 0,
     borderColor: 'transparent',
+    borderTopColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderLeftColor: 'transparent',
     borderStyle: 'none',
     boxShadow: 'none',
     filter: 'none',

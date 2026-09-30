@@ -31,6 +31,10 @@ export interface DomStyleData {
   borderBottomWidth: number;
   borderLeftWidth: number;
   borderColor: string;
+  borderTopColor: string;
+  borderRightColor: string;
+  borderBottomColor: string;
+  borderLeftColor: string;
   borderStyle: string;
 
   // 기타 시각

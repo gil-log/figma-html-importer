@@ -1157,6 +1157,42 @@ export const cases = [
     },
   },
   {
+    id: 'border-single-side-color',
+    title: '한 면에만 준 테두리 색(border-bottom)은 다른 면의 currentColor 가 아니라 그 색으로 들어간다',
+    width: 375,
+    html: '<div style="color:#000"><div style="width:100px;height:30px;border-bottom:2px solid rgb(255, 0, 0)"></div></div>',
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => (n.strokes || []).length > 0);
+      t.eq(solid({ fills: f?.strokes }), [255, 0, 0], 'stroke color');
+    },
+  },
+  {
+    id: 'border-sides-different-colors',
+    title: '면마다 색이 다른 테두리(왼쪽 강조선 등)는 각 면이 자기 색으로 들어간다',
+    width: 375,
+    html: '<div><div style="width:200px;height:40px;border:1px solid rgb(200, 200, 200);border-left:4px solid rgb(0, 0, 255)"></div></div>',
+    check: ({ root }, t) => {
+      const blue = find(root, (n) => hasSolid(n, [0, 0, 255]) || hasSolid({ fills: n.strokes }, [0, 0, 255]));
+      const gray = find(root, (n) => hasSolid(n, [200, 200, 200]) || hasSolid({ fills: n.strokes }, [200, 200, 200]));
+      t.ok(blue, 'blue left border');
+      t.ok(gray, 'gray other borders');
+    },
+  },
+  {
+    id: 'autolayout-side-borders',
+    title: 'Auto Layout 으로 바뀐 컨테이너의 면별 테두리 사각형은 배치에 끼지 않고 제자리에 남는다',
+    width: 375,
+    options: { autoLayout: true },
+    html: '<div style="padding:10px"><div style="display:flex;gap:8px;padding:8px;width:120px;border-left:4px solid rgb(0, 0, 255);border-bottom:1px solid rgb(200, 200, 200)"><div style="width:30px;height:30px;background:red"></div><div style="width:30px;height:30px;background:red"></div></div></div>',
+    check: ({ root }, t) => {
+      const f = find(root, (n) => n.layoutMode === 'HORIZONTAL');
+      t.ok(f, 'auto layout applied');
+      const left = find(root, (n) => n.name === 'border-left');
+      t.eq(left?.layoutPositioning, 'ABSOLUTE', 'border rect absolute');
+      t.eq([left?.x, left?.y], [0, 0], 'border rect position');
+    },
+  },
+  {
     id: 'pseudo-attr-content',
     title: 'content: attr(data-count) 가상요소 글자(알림 숫자 배지)가 들어간다',
     width: 375,

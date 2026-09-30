@@ -694,9 +694,43 @@ function applyCornerRadius(frame: FrameNode | RectangleNode, s: DomStyleData): v
   }
 }
 
+/**
+ * 면마다 색이 다른 테두리(왼쪽 강조선 등) → 면별 사각형.
+ * Figma 는 한 노드에 테두리 색을 하나만 둘 수 있으므로, 모서리가 각진 박스는 면마다 자기 색의 사각형을 깐다
+ * (위·아래를 먼저, 좌·우를 위에). 둥근 모서리는 사각형이 곡선을 따를 수 없어 가장 두꺼운 면 색의 테두리로 둔다.
+ */
+function applySideBorders(frame: FrameNode, s: DomStyleData): boolean {
+  const sides = [
+    { name: 'border-top', w: s.borderTopWidth, color: s.borderTopColor },
+    { name: 'border-bottom', w: s.borderBottomWidth, color: s.borderBottomColor },
+    { name: 'border-left', w: s.borderLeftWidth, color: s.borderLeftColor },
+    { name: 'border-right', w: s.borderRightWidth, color: s.borderRightColor },
+  ].filter((side) => side.w > 0 && side.color && !isTransparent(side.color));
+  const colors = new Set(sides.map((side) => side.color));
+  const square = [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomRightRadius, s.borderBottomLeftRadius]
+    .every((r) => !r);
+  if (colors.size < 2 || !square || s.borderStyle !== 'solid') return false;
+
+  const W = frame.width;
+  const H = frame.height;
+  sides.forEach((side, i) => {
+    const r = figma.createRectangle();
+    r.name = side.name;
+    const paint = toSolidPaint(side.color);
+    r.fills = paint ? [paint] : [];
+    if (side.name === 'border-top') { r.resize(W, side.w); r.x = 0; r.y = 0; }
+    if (side.name === 'border-bottom') { r.resize(W, side.w); r.x = 0; r.y = H - side.w; }
+    if (side.name === 'border-left') { r.resize(side.w, H); r.x = 0; r.y = 0; }
+    if (side.name === 'border-right') { r.resize(side.w, H); r.x = W - side.w; r.y = 0; }
+    frame.insertChild(i, r);
+  });
+  return true;
+}
+
 function applyStrokes(frame: FrameNode, s: DomStyleData): void {
   const maxW = Math.max(s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth);
   if (maxW <= 0 || s.borderStyle === 'none' || isTransparent(s.borderColor)) return;
+  if (applySideBorders(frame, s)) return;
   const paint = toSolidPaint(s.borderColor);
   if (!paint) return;
   frame.strokes = [paint];
@@ -1077,7 +1111,10 @@ function tryAutoLayout(frame: FrameNode, node: DomNodeData, built: BuiltChild[])
     }
   }
 
-  const absolutePositions = absolute.map((b) => ({ n: b.scene as FrameNode, x: b.scene.x, y: b.scene.y }));
+  // 데이터에 없는 장식 레이어(면별 테두리 사각형)도 배치에 끼지 않게 제자리에 둔다
+  const extras = frame.children.filter((c) => !built.some((b) => b.scene === c));
+  const absolutePositions = [...absolute.map((b) => b.scene), ...extras]
+    .map((n) => ({ n: n as FrameNode, x: n.x, y: n.y }));
   frame.layoutMode = horizontal ? 'HORIZONTAL' : 'VERTICAL';
   frame.primaryAxisSizingMode = 'FIXED';
   frame.counterAxisSizingMode = 'FIXED';
@@ -1090,7 +1127,7 @@ function tryAutoLayout(frame: FrameNode, node: DomNodeData, built: BuiltChild[])
   frame.counterAxisAlignItems = counter;
   for (const b of flow) frame.appendChild(b.scene);
   for (const { n, x, y } of absolutePositions) {
-    frame.appendChild(n);
+    if (!extras.includes(n)) frame.appendChild(n);
     n.layoutPositioning = 'ABSOLUTE';
     n.x = x;
     n.y = y;

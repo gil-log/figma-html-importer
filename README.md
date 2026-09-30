@@ -37,8 +37,9 @@ text nodes, and vectors.
   default palette) in backgrounds, gradients (including `in oklab` interpolation hints), shadows,
   borders, and SVG paints are converted to colors Figma understands.
 - **Gradient text** — `background-clip: text` with transparent text becomes a gradient text fill.
-- **Borders** — per-side widths and colors with inside stroke alignment; `dashed` and `dotted`
-  borders become dashed strokes.
+- **Borders** — per-side widths with inside stroke alignment; `dashed` and `dotted` borders become
+  dashed strokes. Sides with different colors (a colored left accent on a gray box) are drawn as one
+  rectangle per side so each keeps its color.
 - **Corner radius** — uniform or per-corner values, with percentages resolved against the element
   size.
 - **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
