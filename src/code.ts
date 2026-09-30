@@ -370,6 +370,46 @@ function parseColorStops(parts: string[], lengthPx: number): { position: number;
   return raw.map((r) => ({ position: r.pos as number, color: r.color }));
 }
 
+type Stop = { position: number; color: RGBA };
+
+function lerpStop(a: Stop, b: Stop, position: number): Stop {
+  const t = b.position === a.position ? 0 : (position - a.position) / (b.position - a.position);
+  const mix = (x: number, y: number) => x + (y - x) * t;
+  return {
+    position,
+    color: { r: mix(a.color.r, b.color.r), g: mix(a.color.g, b.color.g), b: mix(a.color.b, b.color.b), a: mix(a.color.a, b.color.a) },
+  };
+}
+
+/**
+ * repeating-*-gradient: 첫~끝 스톱 한 주기를 0~1 이 다 찰 때까지 반복해 펼치고 경계는 보간한다.
+ * 스톱이 너무 많아지면(가는 줄무늬를 큰 면에) null → 반복 없는 그라디언트로 둔다.
+ */
+function repeatStops(stops: Stop[]): Stop[] | null {
+  const first = stops[0].position;
+  const period = stops[stops.length - 1].position - first;
+  if (period <= 1e-6) return null;
+  const kStart = Math.floor(-first / period);
+  const kEnd = Math.ceil((1 - first) / period);
+  if ((kEnd - kStart + 1) * stops.length > 256) return null;
+  const all: Stop[] = [];
+  for (let k = kStart; k <= kEnd; k++) {
+    for (const st of stops) all.push({ position: st.position + k * period, color: st.color });
+  }
+  const out: Stop[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const cur = all[i];
+    const prev = all[i - 1];
+    if (prev && prev.position < 0 && cur.position > 0) out.push(lerpStop(prev, cur, 0));
+    if (cur.position >= 0 && cur.position <= 1) out.push(cur);
+    if (prev && prev.position < 1 && cur.position > 1) out.push(lerpStop(prev, cur, 1));
+  }
+  // 경계에 같은 위치 스톱이 겹치면 0% 는 안쪽으로 이어지는 마지막 값, 100% 는 안쪽에서 오는 첫 값만 남긴다
+  const trimmed = out.filter((st, i) =>
+    !(st.position === 0 && out[i + 1]?.position === 0) && !(st.position === 1 && out[i - 1]?.position === 1));
+  return trimmed.length >= 2 ? trimmed : null;
+}
+
 /** 2x3 아핀 행렬 역행렬 */
 function invertTransform([[a, b, tx], [c, d, ty]]: Transform): Transform {
   const det = a * d - b * c || 1e-9;
@@ -388,9 +428,10 @@ function invertTransform([[a, b, tx], [c, d, ty]]: Transform): Transform {
  *        그라디언트 공간의 (0, 0.5)→(1, 0.5) 가 시작→끝이다. 그래서 시작/끝점으로 만든 행렬의 역행렬을 넣는다.
  */
 function parseLinearGradient(css: string, w: number, h: number): GradientPaint | null {
-  const m = css.trim().match(/^linear-gradient\(([\s\S]+)\)$/i);
+  const m = css.trim().match(/^(repeating-)?linear-gradient\(([\s\S]+)\)$/i);
   if (!m) return null;
-  const parts = splitTopLevelCommas(m[1]);
+  const repeating = !!m[1];
+  const parts = splitTopLevelCommas(m[2]);
   if (parts.length < 2) return null;
 
   const W = Math.max(w, 1);
@@ -421,8 +462,9 @@ function parseLinearGradient(css: string, w: number, h: number): GradientPaint |
   const sin = Math.sin(rad);
   const cos = Math.cos(rad);
   const length = Math.abs(W * sin) + Math.abs(H * cos);
-  const stops = parseColorStops(stopParts, length);
+  let stops = parseColorStops(stopParts, length);
   if (stops.length < 2) return null;
+  if (repeating) stops = repeatStops(stops) ?? stops;
 
   // 픽셀 좌표의 시작·끝점 (y 는 아래로 증가하므로 방향 벡터는 (sinθ, -cosθ))
   let sx = W / 2 - (sin * length) / 2;
@@ -481,9 +523,10 @@ function parseAtPosition(spec: string, W: number, H: number): { cx: number; cy: 
  * Figma 그라디언트 공간의 원(중심 (0.5,0.5), 반지름 0.5)을 CSS 가 계산한 중심·가로/세로 반지름으로 옮기는 행렬의 역행렬.
  */
 function parseRadialGradient(css: string, w: number, h: number): GradientPaint | null {
-  const m = css.trim().match(/^radial-gradient\(([\s\S]+)\)$/i);
+  const m = css.trim().match(/^(repeating-)?radial-gradient\(([\s\S]+)\)$/i);
   if (!m) return null;
-  const parts = splitTopLevelCommas(m[1]);
+  const repeating = !!m[1];
+  const parts = splitTopLevelCommas(m[2]);
   const W = Math.max(w, 1);
   const H = Math.max(h, 1);
   const first = stripInterpolation(parts[0]).toLowerCase();
@@ -524,8 +567,9 @@ function parseRadialGradient(css: string, w: number, h: number): GradientPaint |
   rx = Math.max(rx, 0.01);
   ry = Math.max(ry, 0.01);
 
-  const stops = parseColorStops(stopParts, rx);
+  let stops = parseColorStops(stopParts, rx);
   if (stops.length < 2) return null;
+  if (repeating) stops = repeatStops(stops) ?? stops;
   // 100% 밖 스톱은 반지름을 늘려서 표현
   const tMax = Math.max(1, stops[stops.length - 1].position);
   if (tMax > 1) {

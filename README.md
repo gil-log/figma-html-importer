@@ -29,7 +29,8 @@ text nodes, and vectors.
 
 ### Styles
 
-- **Backgrounds** — solid colors and stacked linear, radial, and conic gradients. Linear gradients
+- **Backgrounds** — solid colors and stacked linear, radial, and conic gradients (repeating linear
+  and radial stripes included). Linear gradients
   are drawn in the same direction as the browser (angles, side/corner keywords, non-square boxes);
   radial gradients keep their center, shape, and size keyword (`closest-side`, `farthest-corner`, …).
   Color stops can be percentages, px, or angles.

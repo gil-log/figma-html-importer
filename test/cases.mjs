@@ -1207,6 +1207,29 @@ export const cases = [
     check: ({ root }, t) => t.ok(findText(root, '12'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
   },
   {
+    id: 'repeating-gradient',
+    title: 'repeating-linear-gradient 줄무늬는 반복된 색 정지점으로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:20px;background:repeating-linear-gradient(90deg, red 0px, red 10px, blue 10px, blue 20px)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 100)?.fills?.find((f) => f.type === 'GRADIENT_LINEAR');
+      t.ok(g && g.gradientStops.length >= 20, `stops ${g?.gradientStops?.length}`);
+      // 90~100px 는 파란 줄 → 마지막 스톱(100%)은 파랑
+      const last = g?.gradientStops?.[g.gradientStops.length - 1];
+      t.eq(last && [last.position, Math.round(last.color.b * 255)], [1, 255], 'last stop blue at 100%');
+    },
+  },
+  {
+    id: 'repeating-radial-gradient',
+    title: 'repeating-radial-gradient 동심원도 반복된 색 정지점으로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:100px;background:repeating-radial-gradient(circle at center, red 0px, red 5px, blue 5px, blue 10px)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 100)?.fills?.find((f) => f.type === 'GRADIENT_RADIAL');
+      t.ok(g && g.gradientStops.length >= 12, `stops ${g?.gradientStops?.length}`);
+    },
+  },
+  {
     id: 'svg-style-attr-var',
     title: 'SVG style 속성의 CSS 변수(var())는 계산된 색으로 바뀐다',
     width: 375,
