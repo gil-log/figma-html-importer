@@ -90,6 +90,10 @@ export interface DomNodeData {
     height: number;
   };
   visible: boolean;
+  /** 크기가 0 인 박스 (자식만 보인다: 배경·테두리·클리핑 없이 자식만 배치) */
+  collapsed?: boolean;
+  /** display:contents — 자신은 박스가 없고 자식이 부모 기준 좌표를 가진다 */
+  contents?: boolean;
   style: DomStyleData;
   children: DomNodeData[];
 }

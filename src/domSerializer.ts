@@ -35,6 +35,9 @@ function pf(val: string): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** 좌표·크기는 소수 둘째 자리까지 유지 (정수 반올림은 자식이 부모를 1px 넘기거나 얇은 선이 사라지게 만든다) */
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
 // ─── CSS 색상 정규화 (Canvas API) ─────────────────────────────
 // 어떤 CSS 색상 포맷이든 (oklch, color(srgb), 공백구분 rgb 등)
 // 항상 legacy `rgb(r, g, b)` / `rgba(r, g, b, a)` 형태로 변환
@@ -123,10 +126,10 @@ function extractPseudoElement(
       tagName: pseudo,
       text: text || undefined,
       rect: {
-        x: Math.round(x),
-        y: Math.round(y),
-        width: Math.round(w),
-        height: Math.round(h),
+        x: round2(x),
+        y: round2(y),
+        width: round2(w),
+        height: round2(h),
       },
       visible: true,
       style: extractStyle(pcs),
@@ -452,8 +455,6 @@ function truncationOf(cs: CSSStyleDeclaration): { maxLines: number } | undefined
   return undefined;
 }
 
-const round2 = (v: number) => Math.round(v * 100) / 100;
-
 /** 텍스트 노드가 가진 글자·스타일 구간·측정값을 채운다 */
 function fillText(
   target: DomNodeData,
@@ -569,15 +570,21 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   if (cs.visibility === 'hidden') return null;
 
   const rect = el.getBoundingClientRect();
-  // 크기가 0이면 렌더링 안 된 요소
-  if (rect.width < 1 || rect.height < 1) return null;
+  // display:contents 는 박스가 없고, 크기 0 인 박스(절대위치 래퍼 등)도 자식은 보이므로 자식만 살린다
+  const isContents = cs.display === 'contents';
+  const collapsed = isContents || rect.width < 0.01 || rect.height < 0.01;
 
-  const relRect = {
-    x: Math.round(rect.left - parentRect.left),
-    y: Math.round(rect.top - parentRect.top),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
-  };
+  const relRect = isContents
+    ? { x: 0, y: 0, width: 0, height: 0 }
+    : {
+      x: round2(rect.left - parentRect.left),
+      y: round2(rect.top - parentRect.top),
+      width: round2(rect.width),
+      height: round2(rect.height),
+    };
+
+  // 크기 0 인 그림·폼 요소는 보이는 것이 없다
+  if (collapsed && (tag === 'svg' || tag === 'img' || FORM_TAGS.has(tag))) return null;
 
   // SVG: outerHTML을 직렬화하여 Figma에서 createNodeFromSvg로 재현
   if (tag === 'svg') {
@@ -604,8 +611,11 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
 
   // ── 글자 흐름 / 자식 요소 분리 ──────────────────────
   const runs = collectRuns(el, win);
-  // 수치 기준점: 노드 rect 는 반올림되므로 반올림된 원점 기준으로 텍스트 위치를 잰다
+  // 자식 좌표의 기준점 (display:contents 는 부모 원점)
   const origin = { left: parentRect.left + relRect.x, top: parentRect.top + relRect.y };
+  const childBase = isContents
+    ? parentRect
+    : new DOMRect(origin.left, origin.top, rect.width, rect.height);
   if (runs.length === 1 && runs[0].kind === 'text') {
     // 텍스트 리프: 요소 전체가 하나의 글자 흐름
     const b = new TextBuilder();
@@ -616,27 +626,37 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
     const m = built.text.trim() ? measureRange(range) : null;
     if (m) {
       const truncate = truncationOf(cs);
-      const cb = contentBox(cs, rect);
+      // display:contents 는 자기 박스가 없으므로 부모 박스 폭에서 줄바꿈된다
+      const box = isContents ? parentRect : rect;
+      const cb = contentBox(cs, box);
       // 인라인 요소는 content box 가 사각형이 아니므로 실제 글자 폭을 줄바꿈 기준으로 쓴다
       const wrap = cs.display === 'inline' && !truncate
         ? { x: m.box.left - origin.left, width: m.box.right - m.box.left }
-        : { x: rect.left + cb.x - origin.left, width: cb.width };
+        : { x: box.left + cb.x - origin.left, width: cb.width };
       fillText(node, built, m, origin, wrap, truncate);
     }
   } else {
     for (const run of runs) {
       const child = run.kind === 'text'
-        ? textRunNode(el, cs, new DOMRect(origin.left, origin.top, rect.width, rect.height), run.nodes)
-        : serializeDom(run.el, new DOMRect(origin.left, origin.top, rect.width, rect.height));
+        ? textRunNode(el, cs, childBase, run.nodes)
+        : serializeDom(run.el, childBase);
       if (child) node.children.push(child);
     }
   }
 
-  // ::before / ::after 의사 요소 추출
-  const pseudoBefore = extractPseudoElement(el, '::before');
-  if (pseudoBefore) node.children.unshift(pseudoBefore);
-  const pseudoAfter = extractPseudoElement(el, '::after');
-  if (pseudoAfter) node.children.push(pseudoAfter);
+  // ::before / ::after 의사 요소 추출 (display:contents 는 기준이 될 박스가 없다)
+  if (!isContents) {
+    const pseudoBefore = extractPseudoElement(el, '::before');
+    if (pseudoBefore) node.children.unshift(pseudoBefore);
+    const pseudoAfter = extractPseudoElement(el, '::after');
+    if (pseudoAfter) node.children.push(pseudoAfter);
+  }
+
+  if (collapsed) {
+    if (node.children.length === 0 && !node.text) return null;
+    node.collapsed = true;
+    if (isContents) node.contents = true;
+  }
 
   // 텍스트와 의사 요소가 공존하면 텍스트를 측정된 위치의 #text 자식 노드로 옮긴다
   // (buildTree 에서 text+children 동시 처리 불가)
@@ -706,8 +726,8 @@ function serializeSvg(svgEl: SVGElement, cs: CSSStyleDeclaration): string {
   // width/height를 항상 DOM 실제 픽셀값으로 교체
   // (width="100%", width="1em" 등 상대값이면 Figma가 잘못 해석)
   const domR = svgEl.getBoundingClientRect();
-  const pw = Math.round(domR.width) || 24;
-  const ph = Math.round(domR.height) || 24;
+  const pw = round2(domR.width) || 24;
+  const ph = round2(domR.height) || 24;
   svgHtml = svgHtml.replace(/^<svg([^>]*)>/i, (_, attrs: string) => {
     const cleanAttrs = attrs
       .replace(/\s+width\s*=\s*["'][^"']*["']/gi, '')

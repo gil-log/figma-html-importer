@@ -671,9 +671,25 @@ let frameCount = 0;
 let textCount = 0;
 
 async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
-  const { rect, style, tagName, text, textSegments, children, visible, imageUrl } = node;
-  const w = Math.max(rect.width, 1);
-  const h = Math.max(rect.height, 1);
+  const { rect, style, tagName, text, children, visible, imageUrl } = node;
+  const w = Math.max(rect.width, 0.01);
+  const h = Math.max(rect.height, 0.01);
+
+  // ── display:contents: 자기 레이어 없이 자식을 부모에 바로 배치 (자식 좌표는 이미 부모 기준) ──
+  if (node.contents) {
+    if (text) {
+      parent.appendChild(await createTextNode(node, 0, 0));
+      textCount++;
+    }
+    for (const child of children) {
+      try {
+        await buildTree(child, parent);
+      } catch (err) {
+        console.error('[html-importer] buildTree error:', err);
+      }
+    }
+    return;
+  }
 
   // ── 텍스트 리프 노드 ──────────────────────────────
   if (text && children.length === 0) {
@@ -684,7 +700,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     const hasBg = !isTransparent(style.backgroundColor) ||
       (style.backgroundImage !== '' && style.backgroundImage !== 'none');
 
-    if (hasBorder || hasBg) {
+    if ((hasBorder || hasBg) && !node.collapsed) {
       const frame = figma.createFrame();
       frame.name = tagName;
       frame.resize(w, h);
@@ -765,9 +781,11 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   // 자식 extent가 반올림으로 부모를 초과할 수 있음 → clipsContent 시 잘림 방지
   let frameW = w;
   let frameH = h;
-  for (const child of children) {
-    frameH = Math.max(frameH, child.rect.y + child.rect.height);
-    frameW = Math.max(frameW, child.rect.x + child.rect.width);
+  if (!node.collapsed) {
+    for (const child of children) {
+      frameH = Math.max(frameH, child.rect.y + child.rect.height);
+      frameW = Math.max(frameW, child.rect.x + child.rect.width);
+    }
   }
 
   const frame = figma.createFrame();
@@ -775,7 +793,14 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   frame.x = rect.x;
   frame.y = rect.y;
 
-  applyFrameStyle(frame, style, w, h);
+  if (node.collapsed) {
+    // 크기 0 박스: 배경·테두리 없이 자식만 보이게 한다
+    frame.fills = [];
+    frame.clipsContent = false;
+    if (style.opacity < 1) frame.opacity = style.opacity;
+  } else {
+    applyFrameStyle(frame, style, w, h);
+  }
 
   // 자식 재귀 처리
   for (const child of children) {
@@ -786,7 +811,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     }
   }
 
-  applyEffects(frame, style);
+  if (!node.collapsed) applyEffects(frame, style);
   if (!visible) frame.visible = false;
   parent.appendChild(frame);
   frame.name = tagName;
