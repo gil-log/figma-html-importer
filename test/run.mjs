@@ -98,9 +98,9 @@ for (const c of selected) {
   try {
     const steps = c.sequence || (c.html ? [c] : []);
     let res = { roots: [], selected: [] };
-    for (const { html, width, theme, options, selectFrame, failText } of steps) {
+    for (const { html, width, theme, options, selectFrame, failText, shortcut } of steps) {
       const started = Date.now();
-      res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame, failText });
+      res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame, failText, shortcut });
       res.elapsed = Date.now() - started;
       elapsed += res.elapsed;
     }

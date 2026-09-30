@@ -72,14 +72,22 @@ async function loadOne(url: string): Promise<ImageAsset | null> {
   }
 }
 
+/** 한 번의 가져오기 안에서 URL 별 결과를 재사용한다 (여러 폭을 나란히 가져올 때 같은 이미지를 다시 받지 않게) */
+export type ImageCache = Map<string, Promise<ImageAsset | null>>;
+
 /** URL → 이미지 바이트. 받지 못한 URL 은 빠진다 */
-export async function loadImages(urls: string[]): Promise<Record<string, ImageAsset>> {
+export async function loadImages(urls: string[], cache: ImageCache = new Map()): Promise<Record<string, ImageAsset>> {
   const out: Record<string, ImageAsset> = {};
   let next = 0;
   const worker = async () => {
     while (next < urls.length) {
       const url = urls[next++];
-      const asset = await loadOne(url);
+      let pending = cache.get(url);
+      if (!pending) {
+        pending = loadOne(url);
+        cache.set(url, pending);
+      }
+      const asset = await pending;
       if (asset) out[url] = asset;
     }
   };

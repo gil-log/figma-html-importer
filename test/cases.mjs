@@ -1399,4 +1399,23 @@ export const cases = [
       t.ok(elapsed < 20000, `elapsed ${elapsed}ms`);
     },
   },
+  {
+    id: 'shortcut-import',
+    title: '⌘/Ctrl + Enter 로 가져오기가 실행된다',
+    width: 375,
+    shortcut: true,
+    html: '<div><p>via shortcut</p></div>',
+    check: ({ root }, t) => t.ok(findText(root, 'via shortcut'), 'imported'),
+  },
+  {
+    id: 'multi-width-image-reuse',
+    title: '여러 폭을 한 번에 가져와도 같은 이미지는 한 번만 받는다',
+    width: 'multi',
+    html: `<img src="${PNG_1PX}" style="width:20px;height:20px"><p>x</p>`,
+    check: ({ roots, fetchCount }, t) => {
+      t.eq(roots.length, 3, 'three widths');
+      t.eq(fetchCount, 1, 'image fetched once');
+      t.ok(roots.every((r) => imageFill(find(r, (n) => n.type === 'RECTANGLE'))), 'image in every width');
+    },
+  },
 ];

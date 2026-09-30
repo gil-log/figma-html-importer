@@ -92,7 +92,15 @@
       }
       throw new Error('timeout');
     })();
-    doc.querySelector('.import-btn').click();
+    // 이미지 요청 수 (여러 폭 가져오기에서 재사용 확인용)
+    let fetchCount = 0;
+    const origFetch = win.fetch;
+    win.fetch = (...a) => { fetchCount++; return origFetch.apply(win, a); };
+    if (c.shortcut) {
+      doc.querySelector('textarea').dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+    } else {
+      doc.querySelector('.import-btn').click();
+    }
     let done;
     try {
       done = await Promise.race([result, errorWatch]);
@@ -102,12 +110,14 @@
     }
     const created = page.children.filter((n) => !before.has(n));
     window.__failText = null;
+    win.fetch = origFetch;
     await sleep(80); // UI 가 완료 메시지를 그릴 때까지
     return {
       roots: created.map(__serializeNode),
       selected: target ? target.children.map(__serializeNode) : [],
       done,
       messages: __figmaLog.messages.slice(logStart),
+      fetchCount,
       uiText: doc.querySelector('.root').innerText,
     };
   };

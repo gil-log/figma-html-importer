@@ -141,7 +141,7 @@ text nodes, and vectors.
 ## How It Works
 
 1. **Paste HTML** — paste your markup into the text area, or open / drag-and-drop an `.html` file.
-   The last input, width, and options are remembered for the next run.
+   The last input, width, and options are remembered for the next run. ⌘/Ctrl + Enter imports.
 2. **Pick a render width** — select a viewport preset, or "375 · 768 · 1440 — 나란히" to import the
    mobile, tablet, and desktop layouts side by side in one go.
 3. **Pick options** — convert flex containers to Auto Layout, and/or place the result inside the

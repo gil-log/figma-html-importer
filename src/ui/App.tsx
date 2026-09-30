@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {serializeDom} from '../domSerializer';
 import type {DomNodeData, ImportPage, MainToUIMessage, PluginSettings} from '../types';
 import {canvasBackground, findRenderRoot, prepareForCapture, renderHtml} from './render';
-import {collectImageUrls, loadImages} from './images';
+import {collectImageUrls, loadImages, type ImageCache} from './images';
 
 // 렌더 폭별 뷰포트 높이 (vh 단위·position:fixed 기준)
 const WIDTH_OPTIONS = [
@@ -17,12 +17,13 @@ const WIDTH_OPTIONS = [
 const MULTI_WIDTHS = [375, 768, 1440];
 
 type RenderWidth = number | 'multi';
-type Status = 'idle' | 'rendering' | 'parsing' | 'building' | 'done' | 'error';
+type Status = 'idle' | 'rendering' | 'parsing' | 'images' | 'building' | 'done' | 'error';
 
 const STATUS_LABEL: Record<Status, string> = {
   idle: '',
   rendering: 'HTML 렌더링 중...',
   parsing: 'DOM 스타일 분석 중...',
+  images: '이미지 불러오는 중...',
   building: 'Figma 노드 생성 중...',
   done: '',
   error: '',
@@ -101,6 +102,7 @@ export default function App() {
 
     const widths = renderWidth === 'multi' ? MULTI_WIDTHS : [renderWidth];
     const pages: ImportPage[] = [];
+    const imageCache: ImageCache = new Map();
     try {
       for (const [i, width] of widths.entries()) {
         setProgress(widths.length > 1 ? ` (${width}px · ${i + 1}/${widths.length})` : '');
@@ -126,7 +128,8 @@ export default function App() {
           if (!hasBackground(domData)) domData.style.backgroundColor = WHITE;
 
           // ── 4. 참조된 이미지를 바이트로 받아 함께 보낸다 (못 받은 것은 자리표시) ──
-          const images = await loadImages(collectImageUrls(domData));
+          setStatus('images');
+          const images = await loadImages(collectImageUrls(domData), imageCache);
           pages.push({data: domData, images, title: doc.title, width: option.value});
         } finally {
           rendered.dispose();
@@ -158,7 +161,7 @@ export default function App() {
     setError('');
   };
 
-  const isImporting = status === 'rendering' || status === 'parsing' || status === 'building';
+  const isImporting = status === 'rendering' || status === 'parsing' || status === 'images' || status === 'building';
   const canImport = !isImporting && html.trim().length > 0;
 
   return (
@@ -255,9 +258,16 @@ export default function App() {
         >
         <textarea
             className="textarea"
-            placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.\n.html 파일을 끌어다 놓아도 됩니다.`}
+            placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.\n.html 파일을 끌어다 놓아도 됩니다. ⌘/Ctrl + Enter 로 가져오기`}
             value={html}
             onChange={(e) => setHtml(e.target.value)}
+            onKeyDown={(e) => {
+              // ⌘/Ctrl + Enter 로 바로 가져오기
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (canImport) void handleImport();
+              }
+            }}
             disabled={isImporting}
             spellCheck={false}
         />
