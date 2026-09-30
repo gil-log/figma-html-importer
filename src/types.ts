@@ -96,6 +96,11 @@ export interface DomNodeData {
   collapsed?: boolean;
   /** display:contents — 자신은 박스가 없고 자식이 부모 기준 좌표를 가진다 */
   contents?: boolean;
+  /**
+   * 회전 transform (CSS matrix(a, b, c, d, e, f) + transform-origin, 요소 rect 기준 px).
+   * 이 값이 있으면 rect·자식 좌표는 회전을 풀어낸 원래 레이아웃 기준이다.
+   */
+  transform?: { a: number; b: number; c: number; d: number; e: number; f: number; ox: number; oy: number };
   style: DomStyleData;
   children: DomNodeData[];
 }

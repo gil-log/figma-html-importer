@@ -83,6 +83,8 @@ text nodes, and vectors.
   with styled ranges and line breaks. Inline pieces that draw their own box — badges with a
   background, icons, `inline-block` or `display: block` children — stay separate layers at their
   measured positions. Children hidden with `display: none` are left out.
+- **Rotation** — elements rotated with `transform` or the `rotate` property (rotated chevrons,
+  tilted badges) keep their real size and are rotated in Figma around the same `transform-origin`.
 - **Zero-size wrappers and `display: contents`** — children of zero-size absolutely positioned
   wrappers and of `display: contents` elements are kept at their real positions. Positions and sizes
   keep two decimal places, so 0.5px hairlines survive.

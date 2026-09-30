@@ -669,6 +669,29 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number): Promis
   return t;
 }
 
+// ─── 회전 ─────────────────────────────────────────────────────
+
+/**
+ * CSS 회전 → relativeTransform.
+ * CSS 는 transform-origin(O) 기준으로 M 을 적용하고 이동(e, f)을 더하므로
+ * 요소의 왼쪽 위 모서리는 L + O − M·O + (e, f) 로 간다. 회전과 함께 확대됐으면 배율은 크기에 반영한다.
+ */
+function applyRotation(n: FrameNode | RectangleNode, node: DomNodeData): void {
+  const tf = node.transform;
+  if (!tf) return;
+  const { a, b, c, d, e, f, ox, oy } = tf;
+  const sx = Math.hypot(a, b);
+  const sy = (a * d - b * c) / sx;
+  if (Math.abs(sx - 1) > 1e-3 || Math.abs(sy - 1) > 1e-3) {
+    n.resizeWithoutConstraints(Math.max(n.width * sx, 0.01), Math.max(n.height * sy, 0.01));
+  }
+  const cos = a / sx;
+  const sin = b / sx;
+  const x = node.rect.x + ox + e - (a * ox + c * oy);
+  const y = node.rect.y + oy + f - (b * ox + d * oy);
+  n.relativeTransform = [[cos, -sin, x], [sin, cos, y]];
+}
+
 // ─── 재귀 노드 빌더 ───────────────────────────────────────────
 
 let frameCount = 0;
@@ -713,9 +736,26 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       applyFrameStyle(frame, style, w, h);
       frame.appendChild(await createTextNode(node, 0, 0));
       applyEffects(frame, style);
+      applyRotation(frame, node);
       if (!visible) frame.visible = false;
       parent.appendChild(frame);
       frameCount++;
+      textCount++;
+      return;
+    }
+
+    if (node.transform) {
+      // 회전된 텍스트: 요소 크기의 투명 프레임에 넣고 프레임을 회전시킨다
+      const wrapper = figma.createFrame();
+      wrapper.name = tagName;
+      wrapper.fills = [];
+      wrapper.clipsContent = false;
+      wrapper.resize(w, h);
+      wrapper.appendChild(await createTextNode(node, 0, 0));
+      if (style.opacity < 1) wrapper.opacity = style.opacity;
+      applyRotation(wrapper, node);
+      if (!visible) wrapper.visible = false;
+      parent.appendChild(wrapper);
       textCount++;
       return;
     }
@@ -743,6 +783,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
         svgFrame.x = rect.x;
         svgFrame.y = rect.y;
         if (style.opacity < 1) svgFrame.opacity = style.opacity;
+        applyRotation(svgFrame, node);
         if (!visible) svgFrame.visible = false;
         parent.appendChild(svgFrame);
         frameCount++;
@@ -759,6 +800,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     if (style.opacity < 1) r.opacity = style.opacity;
     r.x = rect.x;
     r.y = rect.y;
+    applyRotation(r, node);
     if (!visible) r.visible = false;
     parent.appendChild(r);
     return;
@@ -775,6 +817,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     if (style.opacity < 1) imgRect.opacity = style.opacity;
     imgRect.x = rect.x;
     imgRect.y = rect.y;
+    applyRotation(imgRect, node);
     if (!visible) imgRect.visible = false;
     parent.appendChild(imgRect);
     frameCount++;
@@ -807,6 +850,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   }
 
   if (!node.collapsed) applyEffects(frame, style);
+  applyRotation(frame, node);
   if (!visible) frame.visible = false;
   parent.appendChild(frame);
   frame.name = tagName;

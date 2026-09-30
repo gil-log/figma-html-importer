@@ -513,6 +513,23 @@ export const cases = [
       const m = f?.relativeTransform;
       t.near(m?.[0]?.[0], Math.SQRT1_2, 0.001, 'cos');
       t.near(m?.[1]?.[0], Math.SQRT1_2, 0.001, 'sin');
+      // 중심(50,10) 기준 45° 회전 → 왼쪽 위 모서리 = (40,40) + O − M·O
+      t.near(m?.[0]?.[2], 40 + 50 - Math.SQRT1_2 * 40, 0.05, 'corner x');
+      t.near(m?.[1]?.[2], 40 + 10 - Math.SQRT1_2 * 60, 0.05, 'corner y');
+    },
+  },
+  {
+    id: 'rotate-icon-180',
+    title: '180° 회전한 아이콘(chevron 등)은 뒤집힌 방향으로 같은 자리에 들어간다',
+    width: 375,
+    html: '<div style="padding:10px"><svg style="transform:rotate(180deg);display:block" width="12" height="12" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" fill="none" stroke="black"/></svg></div>',
+    check: ({ root }, t) => {
+      const icon = find(root, (n) => !!n.svg);
+      const m = icon?.relativeTransform;
+      t.near(m?.[0]?.[0], -1, 0.001, 'cos');
+      // 중심 기준 180° → 왼쪽 위 모서리는 원래 오른쪽 아래(22,22)
+      t.near(m?.[0]?.[2], 22, 0.05, 'corner x');
+      t.near(m?.[1]?.[2], 22, 0.05, 'corner y');
     },
   },
 

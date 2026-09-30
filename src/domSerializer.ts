@@ -686,6 +686,66 @@ function serializeFormControl(el: Element, cs: CSSStyleDeclaration, rect: DOMRec
   return node;
 }
 
+// ─── 회전 ─────────────────────────────────────────────────────
+
+type Matrix = [number, number, number, number, number, number];
+
+function parseMatrix(transform: string): Matrix | null {
+  if (!transform || transform === 'none') return null;
+  const m2 = transform.match(/^matrix\(([^)]+)\)$/);
+  if (m2) {
+    const v = m2[1].split(',').map(Number);
+    return v.length === 6 && v.every(isFinite) ? (v as Matrix) : null;
+  }
+  const m3 = transform.match(/^matrix3d\(([^)]+)\)$/);
+  if (m3) {
+    const v = m3[1].split(',').map(Number);
+    return v.length === 16 && v.every(isFinite) ? [v[0], v[1], v[4], v[5], v[12], v[13]] : null;
+  }
+  return null;
+}
+
+/** p' = A·(B·p) */
+function multiply([a1, b1, c1, d1, e1, f1]: Matrix, [a2, b2, c2, d2, e2, f2]: Matrix): Matrix {
+  return [
+    a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,
+    a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,
+    a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1,
+  ];
+}
+
+/**
+ * 회전이 들어간 transform 을 찾아 풀어낸다.
+ * getBoundingClientRect 는 회전된 외접 사각형을 돌려주므로, 회전을 풀고 원래 크기·로컬 좌표로 잰 뒤
+ * Figma 에서 relativeTransform 으로 다시 회전시킨다. 렌더 iframe 은 캡처 후 버리므로 되돌리지 않는다.
+ * 순수 이동·확대는 외접 사각형이 곧 결과이므로 그대로 두고, 뒤집기·기울이기는 Figma 회전으로 표현할 수 없어 둔다.
+ */
+function extractRotation(el: Element, cs: CSSStyleDeclaration): DomNodeData['transform'] | undefined {
+  let m = parseMatrix(cs.transform);
+  const rotateProp = (cs as any).rotate as string | undefined; // CSS 개별 속성 (Tailwind v4 rotate-*)
+  if (rotateProp && rotateProp !== 'none') {
+    const deg = rotateProp.match(/^(-?[\d.]+)deg$/);
+    if (!deg) return undefined;
+    const r = (parseFloat(deg[1]) * Math.PI) / 180;
+    const rot: Matrix = [Math.cos(r), Math.sin(r), -Math.sin(r), Math.cos(r), 0, 0];
+    m = m ? multiply(rot, m) : rot;
+  }
+  if (!m) return undefined;
+  const scaleProp = (cs as any).scale as string | undefined;
+  if (scaleProp && scaleProp !== 'none') return undefined;
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c;
+  const angle = (Math.atan2(b, a) * 180) / Math.PI;
+  if (Math.abs(angle) < 0.01 || det <= 0 || Math.abs(a * c + b * d) > 1e-3 * det) return undefined;
+
+  const [ox, oy] = (cs.transformOrigin || '0 0').split(/\s+/).map(pf);
+  const style = (el as HTMLElement).style;
+  style.setProperty('transform', 'none', 'important');
+  style.setProperty('rotate', 'none', 'important');
+  const r2 = (v: number) => Math.round(v * 1e6) / 1e6;
+  return { a: r2(a), b: r2(b), c: r2(c), d: r2(d), e: round2(e), f: round2(f), ox: round2(ox), oy: round2(oy) };
+}
+
 /**
  * @param el 직렬화할 DOM 요소 (position:fixed 는 render.ts prepareForCapture 에서 absolute 로 바뀐 상태)
  * @param parentRect 부모의 getBoundingClientRect (상대 좌표 계산용)
@@ -699,6 +759,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   if (cs.display === 'none') return null;
   if (cs.visibility === 'hidden') return null;
 
+  const transform = extractRotation(el, cs);
   const rect = el.getBoundingClientRect();
   // display:contents 는 박스가 없고, 크기 0 인 박스(절대위치 래퍼 등)도 자식은 보이므로 자식만 살린다
   const isContents = cs.display === 'contents';
@@ -723,12 +784,14 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
       svgHtml: serializeSvg(el as SVGElement, cs),
       rect: relRect,
       visible: true,
+      transform,
       style: extractStyle(cs),
       children: [],
     };
   }
 
   const node: DomNodeData = { tagName: tag, rect: relRect, visible: true, style: extractStyle(cs), children: [] };
+  if (transform) node.transform = transform;
   applyRadii(node.style, cs, rect.width, rect.height);
 
   if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);
