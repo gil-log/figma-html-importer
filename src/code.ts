@@ -259,86 +259,163 @@ function splitTopLevelCommas(s: string): string[] {
   return parts;
 }
 
+/** CSS 각도 문자열(deg/turn/rad/grad) → deg. 각도가 아니면 null */
+function parseAngle(s: string): number | null {
+  const m = s.trim().match(/^(-?[\d.]+)(deg|turn|rad|grad)$/i);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  switch (m[2].toLowerCase()) {
+    case 'turn': return v * 360;
+    case 'rad': return (v * 180) / Math.PI;
+    case 'grad': return v * 0.9;
+    default: return v;
+  }
+}
+
+/**
+ * 컬러 스톱 목록 → [0..1] 위치가 채워진 스톱.
+ * CSS 규칙대로 첫/끝 기본값 0%/100%, 뒤 스톱이 앞보다 작으면 앞 위치로 올리고,
+ * 위치 없는 스톱은 앞뒤 사이를 균등 분배한다. px 위치는 그라디언트 길이로 나눈다.
+ */
+function parseColorStops(parts: string[], lengthPx: number): { position: number; color: RGBA }[] {
+  const raw: { color: RGBA; pos: number | null }[] = [];
+  for (const part of parts) {
+    const colorMatch = part.match(/^(rgba?\([^)]*\)|color\([^)]*\)|#[\da-fA-F]{3,8}|transparent)\s*(.*)$/i);
+    if (!colorMatch) continue; // 전이 힌트(단독 위치값) 등은 무시
+    const parsed = colorMatch[1].toLowerCase() === 'transparent'
+      ? { rgb: { r: 0, g: 0, b: 0 }, a: 0 }
+      : parseColor(colorMatch[1]) ?? parseHexColor(colorMatch[1]);
+    if (!parsed) continue;
+    const color = { ...parsed.rgb, a: parsed.a };
+    const positions = colorMatch[2].trim().split(/\s+/).filter(Boolean).map((p) =>
+      p.endsWith('%') ? parseFloat(p) / 100 : p.endsWith('px') && lengthPx > 0 ? parseFloat(p) / lengthPx : NaN);
+    if (positions.length === 0) raw.push({ color, pos: null });
+    for (const p of positions) raw.push({ color, pos: isNaN(p) ? null : p });
+  }
+  if (raw.length < 2) return [];
+
+  if (raw[0].pos === null) raw[0].pos = 0;
+  if (raw[raw.length - 1].pos === null) raw[raw.length - 1].pos = 1;
+  let maxSoFar = raw[0].pos as number;
+  for (const r of raw) {
+    if (r.pos !== null) {
+      if (r.pos < maxSoFar) r.pos = maxSoFar;
+      maxSoFar = r.pos;
+    }
+  }
+  for (let i = 1; i < raw.length; i++) {
+    if (raw[i].pos !== null) continue;
+    let j = i;
+    while (raw[j].pos === null) j++;
+    const from = raw[i - 1].pos as number;
+    const to = raw[j].pos as number;
+    for (let k = i; k < j; k++) raw[k].pos = from + ((to - from) * (k - i + 1)) / (j - i + 1);
+  }
+  return raw.map((r) => ({ position: r.pos as number, color: r.color }));
+}
+
+/** 2x3 아핀 행렬 역행렬 */
+function invertTransform([[a, b, tx], [c, d, ty]]: Transform): Transform {
+  const det = a * d - b * c || 1e-9;
+  return [
+    [d / det, -b / det, (b * ty - d * tx) / det],
+    [-c / det, a / det, (c * tx - a * ty) / det],
+  ];
+}
+
 /**
  * CSS linear-gradient() → Figma GradientPaint
- * 예: "linear-gradient(49.89deg, #ea27c2 0%, #e100a3 100%)"
+ * 예: "linear-gradient(49.89deg, rgb(234, 39, 194) 0%, rgb(225, 0, 163) 100%)"
+ *
+ * CSS: 그라디언트 선은 박스 중심을 지나고 길이는 |w·sinθ| + |h·cosθ| (각 모서리가 0%/100% 선에 닿는다).
+ * Figma: gradientTransform 은 레이어(0..1 정규화) 좌표 → 그라디언트 공간 변환이고,
+ *        그라디언트 공간의 (0, 0.5)→(1, 0.5) 가 시작→끝이다. 그래서 시작/끝점으로 만든 행렬의 역행렬을 넣는다.
  */
-function parseLinearGradient(css: string): GradientPaint | null {
-  const m = css.match(/^linear-gradient\(([\s\S]+)\)$/i);
+function parseLinearGradient(css: string, w: number, h: number): GradientPaint | null {
+  const m = css.trim().match(/^linear-gradient\(([\s\S]+)\)$/i);
   if (!m) return null;
-
   const parts = splitTopLevelCommas(m[1]);
   if (parts.length < 2) return null;
 
-  // 각도 파싱 (deg / "to top" 등)
-  let angleDeg = 180; // 기본: top → bottom
-  let stopStart = 0;
-  const angleStr = parts[0].trim();
-  if (/deg$/i.test(angleStr)) {
-    angleDeg = parseFloat(angleStr);
-    stopStart = 1;
-  } else if (/^to\s/i.test(angleStr)) {
-    const dir = angleStr.toLowerCase();
-    if (dir === 'to top') angleDeg = 0;
-    else if (dir === 'to right') angleDeg = 90;
-    else if (dir === 'to bottom') angleDeg = 180;
-    else if (dir === 'to left') angleDeg = 270;
-    else if (dir === 'to top right') angleDeg = 45;
-    else if (dir === 'to bottom right') angleDeg = 135;
-    else if (dir === 'to bottom left') angleDeg = 225;
-    else if (dir === 'to top left') angleDeg = 315;
-    stopStart = 1;
+  const W = Math.max(w, 1);
+  const H = Math.max(h, 1);
+  let angleDeg = 180; // 방향 생략 = to bottom (Chrome 은 기본 방향을 computed 값에서 생략한다)
+  let stopParts = parts;
+  const first = parts[0].trim().toLowerCase();
+  const angle = parseAngle(first);
+  if (angle !== null) {
+    angleDeg = angle;
+    stopParts = parts.slice(1);
+  } else if (first.startsWith('to ')) {
+    const corner = (Math.atan2(H, W) * 180) / Math.PI; // 모서리 방향은 박스 비율에 따라 달라진다
+    const dirs: Record<string, number> = {
+      'to top': 0, 'to right': 90, 'to bottom': 180, 'to left': 270,
+      'to top right': corner, 'to right top': corner,
+      'to bottom right': 180 - corner, 'to right bottom': 180 - corner,
+      'to bottom left': 180 + corner, 'to left bottom': 180 + corner,
+      'to top left': 360 - corner, 'to left top': 360 - corner,
+    };
+    angleDeg = dirs[first.replace(/\s+/g, ' ')] ?? 180;
+    stopParts = parts.slice(1);
   }
 
-  // CSS 각도: 0deg = top(bottom→top), 90deg = right(left→right), 180deg = bottom
   const rad = (angleDeg * Math.PI) / 180;
-  const cosA = Math.cos(rad);
-  const sinA = Math.sin(rad);
+  const sin = Math.sin(rad);
+  const cos = Math.cos(rad);
+  const length = Math.abs(W * sin) + Math.abs(H * cos);
+  const stops = parseColorStops(stopParts, length);
+  if (stops.length < 2) return null;
 
-  // 시작점(0% stop): (0.5 - 0.5*sinθ, 0.5 + 0.5*cosθ)
-  // 끝점(100% stop): (0.5 + 0.5*sinθ, 0.5 - 0.5*cosθ)
-  // Figma gradientTransform: [[a, b, tx], [c, d, ty]]
-  //   transform([0,0]) = start, transform([1,0]) = end
-  //   a = sinθ, c = -cosθ, tx = start.x, ty = start.y
-  const gradientTransform: Transform = [
-    [sinA,  cosA,  0.5 * (1 - sinA)],
-    [-cosA, sinA,  0.5 * (1 + cosA)],
-  ];
+  // 픽셀 좌표의 시작·끝점 (y 는 아래로 증가하므로 방향 벡터는 (sinθ, -cosθ))
+  let sx = W / 2 - (sin * length) / 2;
+  let sy = H / 2 + (cos * length) / 2;
+  let ex = W / 2 + (sin * length) / 2;
+  let ey = H / 2 - (cos * length) / 2;
 
-  // 컬러 스톱 파싱
-  const stopParts = parts.slice(stopStart);
-  const gradientStops: ColorStop[] = [];
-
-  for (let i = 0; i < stopParts.length; i++) {
-    const part = stopParts[i].trim();
-    // 색상과 위치 분리: "rgba(0,0,0,0.5) 30%" or "#fff 0%"
-    const posMatch = part.match(/(.+?)\s+([\d.]+)%\s*$/);
-    let colorStr: string;
-    let position: number;
-    if (posMatch) {
-      colorStr = posMatch[1].trim();
-      position = parseFloat(posMatch[2]) / 100;
-    } else {
-      colorStr = part;
-      position = i / Math.max(stopParts.length - 1, 1);
-    }
-
-    const parsed = parseColor(colorStr) ?? parseHexColor(colorStr);
-    if (!parsed) continue;
-    gradientStops.push({
-      position,
-      color: { ...parsed.rgb, a: parsed.a },
-    });
+  // 0~1 밖의 스톱은 시작·끝점을 늘려서 표현 (Figma 스톱 위치는 0~1 만 허용)
+  const tMin = Math.min(0, stops[0].position);
+  const tMax = Math.max(1, stops[stops.length - 1].position);
+  if (tMin < 0 || tMax > 1) {
+    const dx = ex - sx;
+    const dy = ey - sy;
+    [sx, sy, ex, ey] = [sx + dx * tMin, sy + dy * tMin, sx + dx * tMax, sy + dy * tMax];
+    for (const st of stops) st.position = (st.position - tMin) / (tMax - tMin);
   }
 
-  if (gradientStops.length < 2) return null;
+  // 그라디언트 공간 → 레이어 정규화 좌표 행렬 M: (0,0.5)→시작, (1,0.5)→끝, 세로축은 수직 방향
+  const ux = (ex - sx) / W;
+  const uy = (ey - sy) / H;
+  const vx = (cos * length) / W;
+  const vy = (sin * length) / H;
+  const M: Transform = [
+    [ux, vx, sx / W - 0.5 * vx],
+    [uy, vy, sy / H - 0.5 * vy],
+  ];
 
   return {
     type: 'GRADIENT_LINEAR',
-    gradientTransform,
-    gradientStops,
+    gradientTransform: invertTransform(M),
+    gradientStops: stops.map((st) => ({ position: Math.min(1, Math.max(0, st.position)), color: st.color })),
     opacity: 1,
   };
+}
+
+/**
+ * background-color + background-image(여러 겹) → Figma fills.
+ * CSS 는 첫 번째 레이어가 맨 위, Figma fills 는 마지막이 맨 위이므로 뒤집는다.
+ */
+function backgroundPaints(s: DomStyleData, w: number, h: number): Paint[] {
+  const paints: Paint[] = [];
+  const solid = toSolidPaint(s.backgroundColor);
+  if (solid) paints.push(solid);
+  if (s.backgroundImage && s.backgroundImage !== 'none') {
+    const layers = splitTopLevelCommas(s.backgroundImage).reverse();
+    for (const layer of layers) {
+      const grad = parseLinearGradient(layer, w, h);
+      if (grad) paints.push(grad);
+    }
+  }
+  return paints;
 }
 
 /** #hex 색상 파싱 보조 */
@@ -446,22 +523,8 @@ function applyEffects(node: FrameNode | RectangleNode, s: DomStyleData): void {
   if (effects.length > 0) node.effects = effects;
 }
 
-function applyFrameStyle(frame: FrameNode, s: DomStyleData): void {
-  // backgroundImage(gradient)가 있으면 우선 적용, 없으면 backgroundColor
-  let fills: Paint[] = [];
-  if (s.backgroundImage && s.backgroundImage !== 'none' && s.backgroundImage !== '') {
-    const grad = parseLinearGradient(s.backgroundImage);
-    if (grad) {
-      fills = [grad];
-    } else {
-      const solid = toSolidPaint(s.backgroundColor);
-      if (solid) fills = [solid];
-    }
-  } else {
-    const solid = toSolidPaint(s.backgroundColor);
-    if (solid) fills = [solid];
-  }
-  frame.fills = fills;
+function applyFrameStyle(frame: FrameNode, s: DomStyleData, w: number, h: number): void {
+  frame.fills = backgroundPaints(s, w, h);
 
   applyCornerRadius(frame, s);
   if (s.opacity < 1) frame.opacity = s.opacity;
@@ -572,7 +635,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       frame.resize(w, h);
       frame.x = rect.x;
       frame.y = rect.y;
-      applyFrameStyle(frame, style);
+      applyFrameStyle(frame, style, w, h);
 
       if (isSingleLine) {
         // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 절대 방지
@@ -735,7 +798,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   frame.x = rect.x;
   frame.y = rect.y;
 
-  applyFrameStyle(frame, style);
+  applyFrameStyle(frame, style, w, h);
 
   // 자식 재귀 처리
   for (const child of children) {
@@ -771,7 +834,7 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
     rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
 
     // 루트 스타일 적용
-    applyFrameStyle(rootFrame, data.style);
+    applyFrameStyle(rootFrame, data.style, data.rect.width, data.rect.height);
 
     // 페이지에 추가 후 뷰포트 중앙 배치
     figma.currentPage.appendChild(rootFrame);

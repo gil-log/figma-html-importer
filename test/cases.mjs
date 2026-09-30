@@ -369,6 +369,28 @@ export const cases = [
     },
   },
   {
+    id: 'gradient-layers',
+    title: '배경색 위에 겹친 그라디언트 여러 겹이 순서대로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:40px;background:linear-gradient(rgba(0,0,0,.5),transparent),linear-gradient(to right,#00f,#0f0),#f00"></div></div>',
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 100);
+      t.eq((f?.fills || []).map((p) => p.type), ['SOLID', 'GRADIENT_LINEAR', 'GRADIENT_LINEAR'], 'fill order (bottom → top)');
+      const top = f?.fills?.[2];
+      t.near(top && gradientHandles(top).end[1], 1, 0.01, 'top layer is vertical');
+    },
+  },
+  {
+    id: 'gradient-px-stops',
+    title: 'px 위치 컬러 스톱은 그라디언트 길이 비율로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:40px;background:linear-gradient(to right, red 20px, blue 80px)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 100)?.fills?.find((f) => f.type === 'GRADIENT_LINEAR');
+      t.eq(g?.gradientStops?.map((st) => Math.round(st.position * 100) / 100), [0.2, 0.8], 'positions');
+    },
+  },
+  {
     id: 'bg-clip-text',
     title: 'background-clip:text 그라디언트는 프레임 배경이 되지 않는다 (기존 동작 유지)',
     width: 375,

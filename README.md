@@ -21,8 +21,8 @@ text nodes, and vectors.
 
 ### Styles
 
-- **Backgrounds** — solid colors, linear gradients (angle, direction, multi-stop), and transparent
-  fills.
+- **Backgrounds** — solid colors and stacked linear gradients, drawn in the same direction as the
+  browser (angles, side/corner keywords, non-square boxes) with percentage or px color stops.
 - **Borders** — per-side widths, colors, and styles with inside stroke alignment.
 - **Corner radius** — uniform or per-corner values.
 - **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
