@@ -25,7 +25,9 @@ text nodes, and vectors.
   fills.
 - **Borders** — per-side widths, colors, and styles with inside stroke alignment.
 - **Corner radius** — uniform or per-corner values.
-- **Box shadows** — offset, blur, spread, and color mapped to Figma drop shadows.
+- **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
+  drop or inner shadow with offset, blur, spread, and color. Spread-only rings on transparent
+  elements (Tailwind `ring-*`) become strokes.
 - **Opacity & overflow** — element opacity and `overflow: hidden` mapped to `clipsContent`.
 
 ### Typography

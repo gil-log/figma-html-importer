@@ -67,6 +67,19 @@ export const cases = [
     },
   },
 
+  {
+    id: 'shadow-ring-transparent',
+    title: '배경 없는 요소의 링 그림자(0 0 0 Npx)는 바깥 테두리로 들어간다',
+    width: 375,
+    html: '<div style="padding:10px"><div style="width:80px;height:30px;box-shadow:0 0 0 2px blue"></div></div>',
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 80);
+      t.eq(f?.strokes?.[0]?.color?.b, 1, 'blue stroke');
+      t.eq(f?.strokeWeight, 2, 'weight');
+      t.eq(f?.strokeAlign, 'OUTSIDE', 'align');
+    },
+  },
+
   // ── 투명도 ────────────────────────────────────────────────
   {
     id: 'opacity-zero',

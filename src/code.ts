@@ -208,24 +208,36 @@ async function loadBestFont(family: string, style: string): Promise<FontName> {
 
 // ─── Box Shadow 파싱 ───────────────────────────────────────────
 
-function parseBoxShadow(shadow: string): DropShadowEffect | null {
-  if (!shadow || shadow === 'none') return null;
-  // "0px 4px 16px 0px rgba(0,0,0,0.1)" 또는 "0px 2px 8px rgba(0,0,0,0.2)" 형태
-  const m = shadow.match(
-    /(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?\s+(rgba?\([^)]+\)|#[\da-fA-F]{3,8})/
-  );
-  if (!m) return null;
-  const color = parseColor(m[5]);
-  if (!color) return null;
-  return {
-    type: 'DROP_SHADOW',
-    color: { ...color.rgb, a: color.a },
-    offset: { x: parseFloat(m[1]), y: parseFloat(m[2]) },
-    radius: parseFloat(m[3]),
-    spread: parseFloat(m[4] || '0'),
-    visible: true,
-    blendMode: 'NORMAL',
-  };
+interface ParsedShadow {
+  inset: boolean;
+  x: number;
+  y: number;
+  blur: number;
+  spread: number;
+  color: ParsedColor;
+}
+
+/**
+ * computed box-shadow 목록 파싱.
+ * Chrome 은 "rgba(0, 0, 0, 0.1) 0px 4px 6px -1px, ..." 처럼 색을 앞에 두고 여러 겹을 쉼표로 잇는다.
+ * (Tailwind shadow-* 는 투명 링 2겹 + 실제 그림자 1~2겹)
+ */
+function parseShadows(css: string): ParsedShadow[] {
+  if (!css || css === 'none') return [];
+  const out: ParsedShadow[] = [];
+  for (const part of splitTopLevelCommas(css)) {
+    let s = part;
+    const inset = /\binset\b/.test(s);
+    s = s.replace(/\binset\b/, ' ');
+    const colorMatch = s.match(/rgba?\([^)]*\)|color\([^)]*\)|#[\da-fA-F]{3,8}\b/);
+    if (!colorMatch) continue;
+    const color = parseColor(colorMatch[0]) ?? parseHexColor(colorMatch[0]);
+    if (!color || color.a < 0.01) continue;
+    const lens = s.replace(colorMatch[0], ' ').trim().split(/\s+/).map((v) => parseFloat(v));
+    if (lens.length < 2 || lens.some((v) => isNaN(v))) continue;
+    out.push({ inset, x: lens[0], y: lens[1], blur: lens[2] ?? 0, spread: lens[3] ?? 0, color });
+  }
+  return out;
 }
 
 // ─── 그라디언트 파싱 ───────────────────────────────────────────
@@ -391,9 +403,47 @@ function applyStrokes(frame: FrameNode, s: DomStyleData): void {
   }
 }
 
-function applyEffects(frame: FrameNode, s: DomStyleData): void {
-  const shadow = parseBoxShadow(s.boxShadow);
-  if (shadow) frame.effects = [shadow];
+/**
+ * box-shadow → Figma DROP_SHADOW / INNER_SHADOW.
+ * Figma 는 spread 를 사각형·타원, 또는 fill 이 보이고 clipsContent 가 켜진 프레임에만 허용한다.
+ * - 프레임에 fill 이 있고 자식이 경계 안에 있으면 clipsContent 를 켜서 spread 를 살린다 (보이는 결과는 같다)
+ * - 그래도 안 되면 blur·offset 없는 링(Tailwind ring-*)은 stroke 로, 나머지는 spread 를 빼고 넣는다
+ */
+function applyEffects(node: FrameNode | RectangleNode, s: DomStyleData): void {
+  const shadows = parseShadows(s.boxShadow);
+  if (shadows.length === 0) return;
+
+  const hasVisibleFill = Array.isArray(node.fills) && node.fills.length > 0;
+  let spreadOk = node.type === 'RECTANGLE';
+  if (!spreadOk && node.type === 'FRAME' && hasVisibleFill && shadows.some((sh) => sh.spread !== 0)) {
+    const fits = node.children.every((c) =>
+      c.x >= -0.5 && c.y >= -0.5 && c.x + c.width <= node.width + 0.5 && c.y + c.height <= node.height + 0.5);
+    if (node.clipsContent || fits) {
+      node.clipsContent = true;
+      spreadOk = true;
+    }
+  }
+
+  const effects: Effect[] = [];
+  for (const sh of shadows) {
+    const isRing = sh.x === 0 && sh.y === 0 && sh.blur === 0 && sh.spread > 0;
+    if (sh.spread !== 0 && !spreadOk && isRing && node.strokes.length === 0) {
+      node.strokes = [{ type: 'SOLID', color: sh.color.rgb, opacity: sh.color.a }];
+      node.strokeWeight = sh.spread;
+      node.strokeAlign = sh.inset ? 'INSIDE' : 'OUTSIDE';
+      continue;
+    }
+    const base = {
+      color: { ...sh.color.rgb, a: sh.color.a },
+      offset: { x: sh.x, y: sh.y },
+      radius: Math.max(0, sh.blur),
+      visible: true,
+      blendMode: 'NORMAL' as BlendMode,
+      ...(spreadOk && sh.spread !== 0 ? { spread: sh.spread } : {}),
+    };
+    effects.push(sh.inset ? { type: 'INNER_SHADOW', ...base } : { type: 'DROP_SHADOW', ...base });
+  }
+  if (effects.length > 0) node.effects = effects;
 }
 
 function applyFrameStyle(frame: FrameNode, s: DomStyleData): void {
@@ -416,7 +466,6 @@ function applyFrameStyle(frame: FrameNode, s: DomStyleData): void {
   applyCornerRadius(frame, s);
   if (s.opacity < 1) frame.opacity = s.opacity;
   applyStrokes(frame, s);
-  applyEffects(frame, s);
   // overflow:hidden → clipsContent=true (둥근 모서리 카드 등 콘텐츠 클리핑)
   // 그 외 → false (position:absolute 뱃지/도트가 부모 경계 밖에 보이도록)
   frame.clipsContent = s.overflow === 'hidden' || s.overflow === 'clip';
@@ -558,6 +607,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
         frame.appendChild(t);
       }
 
+      applyEffects(frame, style);
       if (!visible) frame.visible = false;
       parent.appendChild(frame);
       frameCount++;
@@ -662,6 +712,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     imgRect.resize(w, h);
     imgRect.fills = [{ type: 'SOLID', color: { r: 0.88, g: 0.9, b: 0.92 } }];
     applyCornerRadius(imgRect, style);
+    applyEffects(imgRect, style);
     imgRect.x = rect.x;
     imgRect.y = rect.y;
     if (!visible) imgRect.visible = false;
@@ -695,6 +746,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     }
   }
 
+  applyEffects(frame, style);
   if (!visible) frame.visible = false;
   parent.appendChild(frame);
   frame.name = tagName;
@@ -734,6 +786,8 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
         console.error('[html-importer] child error:', err);
       }
     }
+
+    applyEffects(rootFrame, data.style);
 
     // 선택 후 줌
     figma.currentPage.selection = [rootFrame];
