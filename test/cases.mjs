@@ -1443,4 +1443,11 @@ export const cases = [
       t.eq(r?.value?.[0]?.type, 'GRADIENT_LINEAR', 'gradient range');
     },
   },
+  {
+    id: 'layer-names-negative-utility',
+    title: '음수 유틸리티 클래스(-z-10, -top-3)는 레이어 이름이 되지 않고, 아이콘은 data-lucide 이름을 쓴다',
+    width: 375,
+    html: '<div><div class="-z-10 -top-3" style="height:10px"></div><svg data-lucide="calendar" class="lucide" width="10" height="10"><rect width="10" height="10"/></svg></div>',
+    check: ({ root }, t) => t.eq(root.children.map((c) => c.name), ['div', 'icon · calendar'], 'names'),
+  },
 ];

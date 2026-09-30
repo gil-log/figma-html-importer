@@ -120,7 +120,8 @@ text nodes, and vectors.
   layout Figma would compute matches the browser within 1.5px, so margins, wrapping, or
   `space-around` stay absolutely positioned instead of shifting.
 - **Layer names** — layers are named from `data-name` (or `data-figma-name`), `id`, `aria-label`,
-  image `alt`, button/link text, or a meaningful class name; utility classes (Tailwind) are ignored.
+  image `alt`, icon names (`data-lucide`, `data-feather`, `data-icon`), button/link text, or a
+  meaningful class name; utility classes (Tailwind, including negative ones like `-mt-2`) are ignored.
   The imported frame takes the document `<title>`.
 - **Stacking order** — sibling layers are ordered the way CSS paints them: negative `z-index`, then
   in-flow content, then positioned elements, then positive `z-index` (flex and grid items honor

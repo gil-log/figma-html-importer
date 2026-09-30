@@ -1126,7 +1126,7 @@ function extractRotation(el: Element, cs: CSSStyleDeclaration): DomNodeData['tra
 
 // Tailwind 등 유틸리티 클래스는 레이어 이름으로 의미가 없다
 const UTILITY_CLASS = new RegExp(
-  '^(-?(m|p)[trblxyse]?|w|h|size|min-w|min-h|max-w|max-h|gap|space-[xy]|inset|top|right|bottom|left|z|order|' +
+  '^-?((m|p)[trblxyse]?|w|h|size|min-w|min-h|max-w|max-h|gap|space-[xy]|inset|top|right|bottom|left|z|order|' +
   'col|row|basis|grow|shrink|text|font|leading|tracking|bg|from|via|to|border|rounded|ring|shadow|outline|' +
   'opacity|blur|backdrop|fill|stroke|items|justify|content|self|place|object|overflow|translate|rotate|scale|' +
   'skew|origin|transition|duration|ease|delay|animate|cursor|select|pointer-events|decoration|underline-offset|' +
@@ -1135,7 +1135,7 @@ const UTILITY_CLASS = new RegExp(
   'capitalize|italic|underline|sr-only|visible|invisible|grow|shrink|mx-auto|group|peer)$|[:\\[\\]/!]',
 );
 
-/** data-name → id → aria-label → img alt → 버튼·링크 글자 → 의미 있는 클래스 순으로 레이어 이름을 정한다 */
+/** data-name → id → aria-label → img alt → 아이콘 이름 → 버튼·링크 글자 → 의미 있는 클래스 순으로 레이어 이름을 정한다 */
 function layerName(el: Element, tag: string): string | undefined {
   const explicit = el.getAttribute('data-name') || el.getAttribute('data-figma-name');
   if (explicit) return explicit.trim();
@@ -1143,6 +1143,9 @@ function layerName(el: Element, tag: string): string | undefined {
   const label = el.getAttribute('aria-label');
   if (label) return `${tag} · ${label.trim()}`;
   if (tag === 'img' && el.getAttribute('alt')) return `img · ${el.getAttribute('alt')!.trim()}`;
+  // 아이콘 라이브러리(lucide·feather 등)가 남기는 아이콘 이름
+  const icon = el.getAttribute('data-lucide') || el.getAttribute('data-feather') || el.getAttribute('data-icon');
+  if (icon) return `icon · ${icon}`;
   if (tag === 'button' || tag === 'a') {
     const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
     if (text) return `${tag} · ${text.length > 24 ? text.slice(0, 24) + '…' : text}`;
