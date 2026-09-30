@@ -121,6 +121,8 @@ text nodes, and vectors.
   `z-index` without `position`), so overlays declared first still land on top.
 - **Rotation** — elements rotated with `transform` or the `rotate` property (rotated chevrons,
   tilted badges) keep their real size and are rotated in Figma around the same `transform-origin`.
+- **Web components** — content inside open shadow roots (including declarative
+  `<template shadowrootmode>`) and nodes assigned to `<slot>`s are imported where they render.
 - **Zero-size wrappers and `display: contents`** — children of zero-size absolutely positioned
   wrappers and of `display: contents` elements are kept at their real positions. Positions and sizes
   keep two decimal places, so 0.5px hairlines survive.

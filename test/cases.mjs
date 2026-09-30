@@ -1277,4 +1277,26 @@ export const cases = [
       t.eq(box?.clipsContent, true, 'content clipped');
     },
   },
+  {
+    id: 'shadow-dom',
+    title: '웹 컴포넌트(shadow DOM)와 slot 안의 내용이 들어간다',
+    width: 375,
+    html: '<my-card><span>slotted text</span></my-card><script>customElements.define("my-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = \'<div style="padding:8px;background:rgb(0, 0, 255)"><p style="margin:0">shadow text</p><slot></slot></div>\'; } });</script>',
+    check: ({ root }, t) => {
+      t.ok(findText(root, 'shadow text'), 'shadow content');
+      t.ok(findText(root, 'slotted text'), 'slotted content');
+      t.ok(solidFrame(root, [0, 0, 255]), 'shadow styles');
+    },
+  },
+  {
+    id: 'shadow-dom-declarative',
+    title: '선언형 shadow DOM(<template shadowrootmode>)의 내용도 들어간다',
+    width: 375,
+    html: '<div><x-tag><template shadowrootmode="open"><b style="color:rgb(255, 0, 0)">declared</b> <slot></slot></template>light</x-tag></div>',
+    check: ({ root }, t) => {
+      const n = findTextIncl(root, 'declared');
+      t.ok(n, `texts: ${JSON.stringify(texts(root).map((x) => x.characters))}`);
+      t.ok(findTextIncl(root, 'light'), 'slotted light text');
+    },
+  },
 ];

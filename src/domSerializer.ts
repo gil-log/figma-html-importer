@@ -43,6 +43,24 @@ function winOf(el: Element): Window {
   return el.ownerDocument.defaultView as Window;
 }
 
+/**
+ * 실제로 그려지는 자식: shadow root 가 있으면 그 자식, <slot> 은 할당된 노드(없으면 기본 내용).
+ * 웹 컴포넌트의 내용은 light DOM 자식이 아니라 shadow tree 에 있다.
+ */
+function composedChildren(el: Element): Node[] {
+  if (el.shadowRoot) return Array.from(el.shadowRoot.childNodes);
+  if (el.tagName.toLowerCase() === 'slot') {
+    const assigned = (el as HTMLSlotElement).assignedNodes();
+    if (assigned.length) return assigned;
+  }
+  return Array.from(el.childNodes);
+}
+
+/** 글자 스타일을 물려주는 요소 (shadow root 바로 아래 글자는 host) */
+function styleParent(node: Node): Element | null {
+  return node.parentElement ?? ((node.parentNode as ShadowRoot | null)?.host ?? null);
+}
+
 function pf(val: string): number {
   const n = parseFloat(val);
   return isNaN(n) ? 0 : n;
@@ -528,7 +546,8 @@ function isMergeableInline(el: Element, win: Window): boolean {
   if (cs.display !== 'inline') return false;
   if (cs.position === 'absolute' || cs.position === 'fixed') return false;
   if (hasBoxDecoration(cs) || hasPseudoContent(el, win)) return false;
-  return Array.from(el.children).every((c) => isMergeableInline(c, win));
+  if (el.shadowRoot) return false;
+  return composedChildren(el).every((c) => c.nodeType !== Node.ELEMENT_NODE || isMergeableInline(c as Element, win));
 }
 
 type Run = { kind: 'text'; nodes: Node[] } | { kind: 'element'; el: Element };
@@ -544,7 +563,7 @@ function collectRuns(el: Element, win: Window): Run[] {
     if (cur.some((n) => (n.textContent ?? '').trim().length > 0)) runs.push({ kind: 'text', nodes: cur });
     cur = [];
   };
-  for (const node of Array.from(el.childNodes)) {
+  for (const node of composedChildren(el)) {
     if (node.nodeType === Node.TEXT_NODE) {
       cur.push(node);
       continue;
@@ -674,7 +693,7 @@ class TextBuilder {
 
 function walkInline(node: Node, b: TextBuilder, win: Window): void {
   if (node.nodeType === Node.TEXT_NODE) {
-    const parent = node.parentElement;
+    const parent = styleParent(node);
     if (!parent) return;
     b.appendText((node as Text).data, win.getComputedStyle(parent), segStyleOf(parent, win));
     return;
@@ -683,11 +702,12 @@ function walkInline(node: Node, b: TextBuilder, win: Window): void {
   const el = node as Element;
   const tag = el.tagName.toLowerCase();
   if (tag === 'br') {
-    if (el.parentElement) b.appendBreak(segStyleOf(el.parentElement, win));
+    const parent = styleParent(el);
+    if (parent) b.appendBreak(segStyleOf(parent, win));
     return;
   }
   if (SKIP_TAGS.has(tag) || win.getComputedStyle(el).display === 'none') return;
-  for (const child of Array.from(el.childNodes)) walkInline(child, b, win);
+  for (const child of composedChildren(el)) walkInline(child, b, win);
 }
 
 // ─── 텍스트 위치 측정 (Range) ─────────────────────────────────
@@ -697,9 +717,28 @@ interface Measured {
   lines: number;
 }
 
-/** Range 가 그려진 줄 상자들의 합집합과 줄 수 (세로로 겹치는 상자는 같은 줄) */
-function measureRange(range: Range): Measured | null {
-  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0.5 && r.height > 0.5);
+/**
+ * 노드들이 그려진 줄 상자들의 합집합과 줄 수 (세로로 겹치는 상자는 같은 줄).
+ * 노드마다 Range 로 재서 합치므로 slot 에 할당된 light DOM 노드처럼 트리가 다른 노드도 함께 잴 수 있다.
+ */
+function measureNodes(nodes: Node[]): Measured | null {
+  const rects: DOMRect[] = [];
+  const collect = (node: Node) => {
+    if (node.nodeType === Node.ELEMENT_NODE && ((node as Element).tagName.toLowerCase() === 'slot' || (node as Element).shadowRoot)) {
+      composedChildren(node as Element).forEach(collect);
+      return;
+    }
+    const range = (node.ownerDocument as Document).createRange();
+    if (node.nodeType === Node.TEXT_NODE) range.selectNodeContents(node);
+    else range.selectNode(node);
+    rects.push(...Array.from(range.getClientRects()));
+  };
+  nodes.forEach(collect);
+  return measureRects(rects);
+}
+
+function measureRects(all: DOMRect[]): Measured | null {
+  const rects = all.filter((r) => r.width > 0.5 && r.height > 0.5);
   if (rects.length === 0) return null;
   rects.sort((a, b) => a.top - b.top);
   const box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
@@ -805,10 +844,7 @@ function textRunNode(parent: Element, parentCs: CSSStyleDeclaration, parentRect:
   const built = b.finish(segStyleOf(parent, win));
   if (!built.text.trim()) return null;
 
-  const range = parent.ownerDocument.createRange();
-  range.setStartBefore(nodes[0]);
-  range.setEndAfter(nodes[nodes.length - 1]);
-  const m = measureRange(range);
+  const m = measureNodes(nodes);
   if (!m) return null;
 
   const node: DomNodeData = {
@@ -1170,11 +1206,10 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   if (runs.length === 1 && runs[0].kind === 'text') {
     // 텍스트 리프: 요소 전체가 하나의 글자 흐름
     const b = new TextBuilder();
-    for (const n of Array.from(el.childNodes)) walkInline(n, b, win);
+    const kids = composedChildren(el);
+    for (const n of kids) walkInline(n, b, win);
     const built = b.finish(segStyleOf(el, win));
-    const range = el.ownerDocument.createRange();
-    range.selectNodeContents(el);
-    const m = built.text.trim() ? measureRange(range) : null;
+    const m = built.text.trim() ? measureNodes(kids) : null;
     if (m) {
       const truncate = truncationOf(cs);
       // display:contents 는 자기 박스가 없으므로 부모 박스 폭에서 줄바꿈된다
