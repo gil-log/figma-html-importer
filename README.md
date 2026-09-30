@@ -66,7 +66,7 @@ text nodes, and vectors.
   (`SemiBold` / `Semi Bold` / `600`, `Italic` vs `Regular Italic`), picking the closest weight the way
   CSS font matching does.
 - **Italic, line-height, letter-spacing, text-align, and text-transform** all preserved
-  (`uppercase` / `lowercase` / `capitalize` become Figma text case).
+  (`uppercase` / `lowercase` / `capitalize` and `font-variant: small-caps` become Figma text case).
 - **Underline details and outlined text** — underline/strike-through style (`wavy`, `dotted`),
   color, thickness, and `text-underline-offset` carry over, including underlines inherited from an
   ancestor link; `-webkit-text-stroke` becomes a text stroke.

@@ -1382,4 +1382,11 @@ export const cases = [
       t.near(ph?.width, 204, 1, 'width incl. border');
     },
   },
+  {
+    id: 'small-caps',
+    title: 'font-variant: small-caps 는 Figma 작은 대문자로 들어간다',
+    width: 375,
+    html: '<div><p style="font-variant:small-caps">Small Caps</p></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'Small Caps')?.textCase, 'SMALL_CAPS', 'textCase'),
+  },
 ];

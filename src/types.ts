@@ -25,6 +25,7 @@ export interface DomStyleData {
   textStrokeWidth: number;
   textStrokeColor: string;
   textTransform: string;
+  fontVariantCaps: string;
   direction: string;
 
   // 테두리
@@ -91,6 +92,7 @@ export interface TextSegment {
   textDecorationThickness?: string;
   textUnderlineOffset?: string;
   textTransform?: string;
+  fontVariantCaps?: string;
   letterSpacing?: string;
 }
 

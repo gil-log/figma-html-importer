@@ -947,13 +947,15 @@ function toTextAlign(textAlign: string, direction: string): 'LEFT' | 'CENTER' | 
   }
 }
 
-function toTextCase(textTransform: string | undefined): TextCase {
+function toTextCase(textTransform: string | undefined, fontVariantCaps?: string): TextCase {
   switch (textTransform) {
     case 'uppercase': return 'UPPER';
     case 'lowercase': return 'LOWER';
     case 'capitalize': return 'TITLE';
-    default: return 'ORIGINAL';
   }
+  if (fontVariantCaps === 'small-caps') return 'SMALL_CAPS';
+  if (fontVariantCaps === 'all-small-caps') return 'SMALL_CAPS_FORCED';
+  return 'ORIGINAL';
 }
 
 function toTextDecoration(decoration: string | undefined): TextDecoration {
@@ -1020,7 +1022,9 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
       const dc = toDecorationColor(seg.textDecorationColor, seg.color ?? style.color);
       if (dc) t.setRangeTextDecorationColor(start, end, dc);
     }
-    if (seg.textTransform) t.setRangeTextCase(start, end, toTextCase(seg.textTransform));
+    if (seg.textTransform || seg.fontVariantCaps) {
+      t.setRangeTextCase(start, end, toTextCase(seg.textTransform ?? style.textTransform, seg.fontVariantCaps ?? style.fontVariantCaps));
+    }
     if (seg.letterSpacing) {
       t.setRangeLetterSpacing(start, end, toLetterSpacing(seg.letterSpacing) ?? { value: 0, unit: 'PIXELS' });
     }
@@ -1072,7 +1076,7 @@ async function createTextNode(node: DomNodeData, ox: number, oy: number, layerEf
       t.strokeAlign = 'CENTER';
     }
   }
-  const textCase = toTextCase(style.textTransform);
+  const textCase = toTextCase(style.textTransform, style.fontVariantCaps);
   if (textCase !== 'ORIGINAL') t.textCase = textCase;
   const align = toTextAlign(style.textAlign, style.direction);
   t.textAlignHorizontal = align;

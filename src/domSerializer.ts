@@ -461,6 +461,7 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     textStrokeWidth: pf((cs as any).webkitTextStrokeWidth),
     textStrokeColor: normalizeCssColor((cs as any).webkitTextStrokeColor || ''),
     textTransform: cs.textTransform,
+    fontVariantCaps: cs.fontVariantCaps,
     direction: cs.direction,
     borderTopLeftRadius: pf(cs.borderTopLeftRadius),
     borderTopRightRadius: pf(cs.borderTopRightRadius),
@@ -614,7 +615,8 @@ function wsMode(cs: CSSStyleDeclaration): WsMode {
 type SegStyle = Omit<TextSegment, 'text'>;
 const SEG_KEYS: (keyof SegStyle)[] = [
   'fontFamily', 'fontWeight', 'fontStyle', 'fontSize', 'color', 'textDecoration', 'textDecorationStyle',
-  'textDecorationColor', 'textDecorationThickness', 'textUnderlineOffset', 'textTransform', 'letterSpacing',
+  'textDecorationColor', 'textDecorationThickness', 'textUnderlineOffset', 'textTransform', 'fontVariantCaps',
+  'letterSpacing',
 ];
 
 type Decoration = Pick<TextSegment, 'textDecoration' | 'textDecorationStyle' | 'textDecorationColor' |
@@ -653,6 +655,7 @@ function segStyleOf(el: Element, win: Window): SegStyle {
     color: textColor(cs),
     ...decorationOf(el, win),
     textTransform: cs.textTransform,
+    fontVariantCaps: cs.fontVariantCaps,
     letterSpacing: cs.letterSpacing,
   };
 }
