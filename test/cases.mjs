@@ -496,7 +496,10 @@ export const cases = [
     title: 'dashed 테두리는 점선으로 들어간다',
     width: 375,
     html: '<div><div style="width:100px;height:40px;border:2px dashed #999"></div></div>',
-    check: ({ root }, t) => t.ok((frameBy(root, (n) => n.width === 100)?.dashPattern || []).length >= 2, 'dashPattern'),
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => (n.strokes || []).length > 0);
+      t.eq(f?.dashPattern, [6, 6], 'dashPattern');
+    },
   },
   {
     id: 'rotate',

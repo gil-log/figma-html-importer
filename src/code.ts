@@ -447,12 +447,12 @@ function applyCornerRadius(frame: FrameNode | RectangleNode, s: DomStyleData): v
   const { borderTopLeftRadius: tl, borderTopRightRadius: tr,
           borderBottomRightRadius: br, borderBottomLeftRadius: bl } = s;
   if (tl === tr && tr === br && br === bl) {
-    if (tl > 0) (frame as any).cornerRadius = Math.round(tl);
+    if (tl > 0) (frame as any).cornerRadius = tl;
   } else {
-    (frame as FrameNode).topLeftRadius = Math.round(tl);
-    (frame as FrameNode).topRightRadius = Math.round(tr);
-    (frame as FrameNode).bottomRightRadius = Math.round(br);
-    (frame as FrameNode).bottomLeftRadius = Math.round(bl);
+    (frame as FrameNode).topLeftRadius = tl;
+    (frame as FrameNode).topRightRadius = tr;
+    (frame as FrameNode).bottomRightRadius = br;
+    (frame as FrameNode).bottomLeftRadius = bl;
   }
 }
 
@@ -468,6 +468,10 @@ function applyStrokes(frame: FrameNode, s: DomStyleData): void {
     s.borderTopWidth === s.borderRightWidth &&
     s.borderRightWidth === s.borderBottomWidth &&
     s.borderBottomWidth === s.borderLeftWidth;
+
+  // dashed·dotted → 점선 (Chrome 처럼 dashed 는 굵기의 3배 길이, dotted 는 굵기 길이)
+  if (s.borderStyle === 'dashed') frame.dashPattern = [maxW * 3, maxW * 3];
+  else if (s.borderStyle === 'dotted') frame.dashPattern = [maxW, maxW];
 
   if (isUniform) {
     frame.strokeWeight = maxW;

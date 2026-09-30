@@ -29,8 +29,10 @@ text nodes, and vectors.
 
 - **Backgrounds** — solid colors and stacked linear gradients, drawn in the same direction as the
   browser (angles, side/corner keywords, non-square boxes) with percentage or px color stops.
-- **Borders** — per-side widths, colors, and styles with inside stroke alignment.
-- **Corner radius** — uniform or per-corner values.
+- **Borders** — per-side widths and colors with inside stroke alignment; `dashed` and `dotted`
+  borders become dashed strokes.
+- **Corner radius** — uniform or per-corner values, with percentages resolved against the element
+  size.
 - **Box shadows** — every layer of a multi-layer shadow (Tailwind `shadow-*` included) becomes a Figma
   drop or inner shadow with offset, blur, spread, and color. Spread-only rings on transparent
   elements (Tailwind `ring-*`) become strokes.

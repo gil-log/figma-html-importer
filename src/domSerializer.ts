@@ -122,6 +122,8 @@ function extractPseudoElement(
       text = textMatch[1];
     }
 
+    const style = extractStyle(pcs);
+    applyRadii(style, pcs, w, h);
     return {
       tagName: pseudo,
       text: text || undefined,
@@ -132,12 +134,31 @@ function extractPseudoElement(
         height: round2(h),
       },
       visible: true,
-      style: extractStyle(pcs),
+      style,
       children: [],
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * border-*-radius 계산값("10px", "50%", "10px 20px") → px.
+ * %는 가로=폭·세로=높이 기준이고, 가로·세로가 다른 타원 모서리는 Figma 가 표현하지 못하므로 작은 쪽을 쓴다.
+ */
+function resolveRadius(value: string, width: number, height: number): number {
+  const parts = (value || '0').trim().split(/\s+/);
+  const toPx = (v: string, base: number) => (v.endsWith('%') ? (parseFloat(v) / 100) * base : pf(v));
+  const rx = toPx(parts[0], width);
+  const ry = toPx(parts[1] ?? parts[0], height);
+  return round2(Math.min(rx, ry));
+}
+
+function applyRadii(style: DomStyleData, cs: CSSStyleDeclaration, width: number, height: number): void {
+  style.borderTopLeftRadius = resolveRadius(cs.borderTopLeftRadius, width, height);
+  style.borderTopRightRadius = resolveRadius(cs.borderTopRightRadius, width, height);
+  style.borderBottomRightRadius = resolveRadius(cs.borderBottomRightRadius, width, height);
+  style.borderBottomLeftRadius = resolveRadius(cs.borderBottomLeftRadius, width, height);
 }
 
 function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
@@ -708,6 +729,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   }
 
   const node: DomNodeData = { tagName: tag, rect: relRect, visible: true, style: extractStyle(cs), children: [] };
+  applyRadii(node.style, cs, rect.width, rect.height);
 
   if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);
   if (tag === 'img') {
