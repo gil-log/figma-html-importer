@@ -257,6 +257,13 @@ export const cases = [
     check: ({ root }, t) => t.ok(findText(root, 'from script'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
   },
   {
+    id: 'script-alert',
+    title: '붙여넣은 스크립트의 alert() 가 가져오기를 막지 않는다',
+    width: 375,
+    html: '<div><p>after alert</p></div><script>alert("blocked")</script>',
+    check: ({ root }, t) => t.ok(findText(root, 'after alert'), 'text exists'),
+  },
+  {
     id: 'media-query',
     title: '미디어쿼리·vw·vh 는 선택한 렌더 폭(1440×900) 기준으로 계산된다',
     width: 1440,

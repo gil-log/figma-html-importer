@@ -4,6 +4,9 @@
  * 렌더링된 DOM을 순회하며 getBoundingClientRect + getComputedStyle로
  * 실제 레이아웃과 스타일을 추출해 DomNodeData 트리를 만든다.
  * code.ts(Figma 샌드박스)로는 DOM API가 없으므로 이쪽에서만 실행된다.
+ *
+ * 대상 DOM 은 렌더 iframe(render.ts) 안에 있으므로 getComputedStyle·Range 등은
+ * 항상 요소가 속한 문서의 window 로 호출한다 (미디어쿼리·vw 가 렌더 폭 기준으로 계산되도록).
  */
 import type { DomNodeData, DomStyleData, TextSegment } from './types';
 
@@ -19,6 +22,11 @@ const INLINE_TEXT_TAGS = new Set([
   'sub', 'sup', 'abbr', 'cite', 'code', 'kbd', 'label',
   'time', 'u', 's', 'del', 'ins',
 ]);
+
+/** 요소가 속한 문서(렌더 iframe)의 window */
+function winOf(el: Element): Window {
+  return el.ownerDocument.defaultView as Window;
+}
 
 function pf(val: string): number {
   const n = parseFloat(val);
@@ -83,7 +91,7 @@ function extractPseudoElement(
   pseudo: '::before' | '::after',
 ): DomNodeData | null {
   try {
-    const pcs = window.getComputedStyle(el, pseudo);
+    const pcs = winOf(el).getComputedStyle(el, pseudo);
     const content = pcs.content;
     if (!content || content === 'none' || content === 'normal') return null;
     if (pcs.display === 'none') return null;
@@ -95,7 +103,7 @@ function extractPseudoElement(
     let x = 0;
     let y = 0;
     if (pcs.position === 'absolute' || pcs.position === 'fixed') {
-      const elCs = window.getComputedStyle(el);
+      const elCs = winOf(el).getComputedStyle(el);
       const bl = pf(elCs.borderLeftWidth);
       const bt = pf(elCs.borderTopWidth);
       x = bl + (pcs.left !== 'auto' ? pf(pcs.left) : 0);
@@ -174,39 +182,24 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
 }
 
 /**
- * @param el 직렬화할 DOM 요소
+ * @param el 직렬화할 DOM 요소 (position:fixed 는 render.ts prepareForCapture 에서 absolute 로 바뀐 상태)
  * @param parentRect 부모의 getBoundingClientRect (상대 좌표 계산용)
- * @param isRoot true이면 position:fixed 체크를 건너뜀
- *               (container 자체가 루트일 때 필요)
  */
-export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): DomNodeData | null {
+export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | null {
   const tag = el.tagName.toLowerCase();
   if (SKIP_TAGS.has(tag)) return null;
 
-  const cs = window.getComputedStyle(el);
+  const win = winOf(el);
+  const cs = win.getComputedStyle(el);
   if (cs.display === 'none') return null;
   if (cs.visibility === 'hidden') return null;
-  // position:fixed 요소 처리:
-  // viewport 기준 좌표라 부모 기준 위치가 어긋나므로
-  // 일시적으로 absolute로 변경하여 부모 기준 좌표를 얻는다.
-  // (모바일 UI의 fixed 하단 바 등을 올바르게 포함하기 위해)
-  let fixedConverted = false;
-  if (!isRoot && cs.position === 'fixed') {
-    const htmlEl = el as HTMLElement;
-    htmlEl.style.position = 'absolute';
-    fixedConverted = true;
-  }
 
   const rect = el.getBoundingClientRect();
   // 크기가 0이면 렌더링 안 된 요소
-  if (rect.width < 1 || rect.height < 1) {
-    if (fixedConverted) (el as HTMLElement).style.position = 'fixed';
-    return null;
-  }
+  if (rect.width < 1 || rect.height < 1) return null;
 
   // SVG: outerHTML을 직렬화하여 Figma에서 createNodeFromSvg로 재현
   if (tag === 'svg') {
-    if (fixedConverted) (el as HTMLElement).style.position = 'fixed';
     return {
       tagName: 'svg',
       svgHtml: serializeSvg(el as SVGElement, cs),
@@ -292,7 +285,7 @@ export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): 
           const trimmed = childNode.textContent?.trim();
           if (!trimmed) continue;
           // Range API로 텍스트 노드의 정확한 위치/크기 측정
-          const range = document.createRange();
+          const range = el.ownerDocument.createRange();
           range.selectNodeContents(childNode);
           const textRect = range.getBoundingClientRect();
           if (textRect.width < 1 || textRect.height < 1) continue;
@@ -384,14 +377,11 @@ export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): 
   const nodeStyle = extractStyle(cs);
   if (isPlaceholder) {
     try {
-      const phCs = window.getComputedStyle(el, '::placeholder');
+      const phCs = win.getComputedStyle(el, '::placeholder');
       const phColor = normalizeCssColor(phCs.color);
       if (phColor && phColor !== 'transparent') nodeStyle.color = phColor;
     } catch { /* ::placeholder not supported */ }
   }
-
-  // fixed → absolute 변환을 했으면 원래대로 복원
-  if (fixedConverted) (el as HTMLElement).style.position = 'fixed';
 
   return {
     tagName: tag,
@@ -416,7 +406,8 @@ export function serializeDom(el: Element, parentRect: DOMRect, isRoot = false): 
  *   → [{ text:"텍스트", bold:false }, { text:"볼드", bold:true }, { text:"나머지", bold:false }]
  */
 function extractTextSegments(el: Element): TextSegment[] {
-  const parentColor = normalizeCssColor(window.getComputedStyle(el).color);
+  const win = winOf(el);
+  const parentColor = normalizeCssColor(win.getComputedStyle(el).color);
   // el.textContent.trim()과 정확히 일치하는 세그먼트 배열을 생성한다.
   // trim된 전체 텍스트를 기준으로 각 세그먼트의 위치를 매핑해야
   // code.ts의 setRangeFills/setRangeFontName offset이 정확하다.
@@ -435,7 +426,7 @@ function extractTextSegments(el: Element): TextSegment[] {
       rawText = node.textContent || '';
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const childEl = node as Element;
-      const childCs = window.getComputedStyle(childEl);
+      const childCs = win.getComputedStyle(childEl);
       const isBold = parseInt(childCs.fontWeight) >= 700;
       const childColor = normalizeCssColor(childCs.color);
       rawText = childEl.textContent || '';
@@ -486,10 +477,10 @@ function serializeSvg(svgEl: SVGElement, cs: CSSStyleDeclaration): string {
       useEl.getAttribute('xlink:href') ||
       '';
     if (!href.startsWith('#')) continue;
-    const symbolEl = document.getElementById(href.slice(1));
+    const symbolEl = svgEl.ownerDocument.getElementById(href.slice(1));
     if (!symbolEl) continue;
 
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const g = svgEl.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');
     // symbol의 viewBox를 transform으로 반영
     const vb = symbolEl.getAttribute('viewBox');
     if (vb) {

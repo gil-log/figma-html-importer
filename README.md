@@ -11,13 +11,19 @@ text nodes, and vectors.
 ### Rendering
 
 - **Full HTML documents or fragments** — works with a complete `<!DOCTYPE html>` page or a bare
-  `<div>` snippet.
-- **Tailwind CSS support** — automatically loads the Tailwind Play CDN and injects your
-  `tailwind.config` so custom theme colors, utilities, and arbitrary values all work.
-- **Custom `<style>` blocks** — any CSS you include in the HTML is injected and applied before
-  serialization.
-- **Responsive viewport** — choose from 6 render-width presets (375 px Mobile through 3840 px Extra
-  Wide) to capture the exact breakpoint you need.
+  `<div>` snippet. A single element (a button, a card) is imported as a tightly cropped frame; a
+  page with several top-level elements or a page background is imported whole.
+- **Isolated rendering** — the HTML is rendered in its own sandboxed iframe sized to the chosen
+  viewport, so `<head>` styles and `<script>` tags run in document order just like a normal page,
+  and nothing leaks between imports. Scripts that throw or call `alert()` cannot break the plugin.
+- **Tailwind CSS support** — the Tailwind Play CDN script in your HTML works as-is, including
+  `tailwind.config = {...}` and `<style type="text/tailwindcss">` with `@apply`.
+- **Responsive viewport** — choose from 6 presets (375×812 Mobile through 3840×2160 Extra Wide).
+  Media queries, Tailwind breakpoints (`md:`, `lg:`), and `vw`/`vh` units are evaluated against that
+  viewport.
+- **Page background** — `html`/`body` backgrounds (including `<body class="bg-...">`) fill the
+  imported frame, following the CSS canvas background rules. Pages without a background get white,
+  as in the browser.
 
 ### Styles
 
@@ -79,8 +85,8 @@ text nodes, and vectors.
 - External images are shown as placeholder rectangles (Figma plugin sandbox cannot fetch
   cross-origin images).
 - Fonts not installed in your Figma account fall back through the chain above.
-- `position: fixed` elements are skipped (viewport-relative coordinates do not map to a
-  parent-relative tree).
+- `position: fixed` elements are placed relative to the whole page, so a fixed bottom bar ends up at
+  the bottom of the imported frame.
 - CSS animations, transitions, and interactive states are not captured.
 
 ## Development
