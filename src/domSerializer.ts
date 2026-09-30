@@ -532,30 +532,137 @@ function textRunNode(parent: Element, parentCs: CSSStyleDeclaration, parentRect:
   return node;
 }
 
-/** input·textarea·select 의 표시 글자 (Range 로 잴 수 없어 content box 기준으로 배치) */
-function fillFormText(el: Element, cs: CSSStyleDeclaration, rect: DOMRect, node: DomNodeData): boolean {
-  const inputEl = el as HTMLInputElement;
-  const val = inputEl.value?.trim();
-  const ph = el.getAttribute('placeholder')?.trim();
-  const text = val || ph;
-  if (!text) return false;
-  node.text = text;
-  const cb = contentBox(cs, rect);
-  const isTextarea = el.tagName.toLowerCase() === 'textarea';
-  const lineH = parseFloat(cs.lineHeight) || (pf(cs.fontSize) || 14) * 1.2;
-  const lines = isTextarea ? text.split('\n').length : 1;
-  // input 글자는 세로 가운데, textarea 는 위쪽부터 채워진다
-  const height = isTextarea ? Math.min(lines * lineH, cb.height || lines * lineH) : cb.height;
-  node.textBox = { x: round2(cb.x), y: round2(cb.y), width: round2(cb.width), height: round2(height) };
-  node.wrapBox = { x: round2(cb.x), width: round2(cb.width) };
-  node.lineCount = lines;
-  if (!val && ph) {
-    try {
-      const phColor = normalizeCssColor(winOf(el).getComputedStyle(el, '::placeholder').color);
-      if (phColor && phColor !== 'transparent') node.style.color = phColor;
-    } catch { /* ::placeholder not supported */ }
+// ─── 폼 컨트롤 ────────────────────────────────────────────────
+
+const SVG_NS_ATTR = 'xmlns="http://www.w3.org/2000/svg"';
+const NATIVE_BORDER = '#767676';
+
+/** accent-color (auto 면 Chrome 기본 파랑) */
+function accentOf(cs: CSSStyleDeclaration): string {
+  const accent = (cs as any).accentColor as string | undefined;
+  return accent && accent !== 'auto' ? normalizeCssColor(accent) : 'rgb(0, 117, 255)';
+}
+
+/** appearance:auto 인 체크박스·라디오·range·color 는 CSS 로 그려지지 않으므로 기본 모양을 SVG 로 그린다 */
+function nativeControlSvg(type: string, el: HTMLInputElement, cs: CSSStyleDeclaration, w: number, h: number): string | null {
+  const accent = accentOf(cs);
+  const open = `<svg ${SVG_NS_ATTR} width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`;
+  if (type === 'checkbox') {
+    const box = el.checked
+      ? `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="2" fill="${accent}" stroke="${accent}"/>` +
+        `<path d="M${w * 0.24} ${h * 0.52} L${w * 0.42} ${h * 0.7} L${w * 0.76} ${h * 0.3}" fill="none" stroke="#ffffff" ` +
+        `stroke-width="${round2(Math.max(1.5, w * 0.14))}" stroke-linecap="round" stroke-linejoin="round"/>`
+      : `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="2" fill="#ffffff" stroke="${NATIVE_BORDER}"/>`;
+    return open + box + '</svg>';
   }
-  return true;
+  if (type === 'radio') {
+    const r = Math.min(w, h) / 2;
+    const ring = `<circle cx="${w / 2}" cy="${h / 2}" r="${r - 0.5}" fill="#ffffff" stroke="${el.checked ? accent : NATIVE_BORDER}"/>`;
+    const dot = el.checked ? `<circle cx="${w / 2}" cy="${h / 2}" r="${round2(r * 0.55)}" fill="${accent}"/>` : '';
+    return open + ring + dot + '</svg>';
+  }
+  if (type === 'range') {
+    const min = parseFloat(el.min || '0');
+    const max = parseFloat(el.max || '100');
+    const ratio = max > min ? Math.min(1, Math.max(0, (parseFloat(el.value) - min) / (max - min))) : 0.5;
+    const thumbR = Math.min(h / 2, 8);
+    const cx = thumbR + (w - thumbR * 2) * ratio;
+    const ty = h / 2 - 2;
+    return open +
+      `<rect x="0" y="${ty}" width="${w}" height="4" rx="2" fill="#efefef" stroke="#b2b2b2" stroke-width="0.5"/>` +
+      `<rect x="0" y="${ty}" width="${round2(cx)}" height="4" rx="2" fill="${accent}"/>` +
+      `<circle cx="${round2(cx)}" cy="${h / 2}" r="${thumbR}" fill="${accent}"/></svg>`;
+  }
+  if (type === 'color') {
+    return open +
+      `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="2" fill="#efefef" stroke="${NATIVE_BORDER}"/>` +
+      `<rect x="4" y="4" width="${Math.max(w - 8, 1)}" height="${Math.max(h - 8, 1)}" fill="${el.value || '#000000'}"/></svg>`;
+  }
+  return null;
+}
+
+const DEFAULT_BUTTON_LABEL: Record<string, string> = { submit: 'Submit', reset: 'Reset' };
+
+/**
+ * input·textarea·select.
+ * 표시 글자는 Range 로 잴 수 없어 content box 기준으로 배치한다 (input 은 세로 가운데, textarea 는 위부터).
+ */
+function serializeFormControl(el: Element, cs: CSSStyleDeclaration, rect: DOMRect, node: DomNodeData): DomNodeData {
+  const tag = el.tagName.toLowerCase();
+  const input = el as HTMLInputElement;
+  const type = tag === 'input' ? (input.type || 'text').toLowerCase() : tag;
+  const native = ((cs as any).appearance || (cs as any).webkitAppearance || 'auto') !== 'none';
+
+  if (['checkbox', 'radio', 'range', 'color'].includes(type)) {
+    // 값("on" 등)은 글자로 보이지 않는다. appearance:none 이면 CSS 로 꾸민 박스를 그대로 쓴다
+    const svg = native ? nativeControlSvg(type, input, cs, round2(rect.width), round2(rect.height)) : null;
+    return svg ? { ...node, tagName: 'svg', svgHtml: svg } : node;
+  }
+  if (type === 'file' || type === 'image' || type === 'hidden') return node;
+
+  let text: string | undefined;
+  let isPlaceholder = false;
+  if (tag === 'select') {
+    text = (el as HTMLSelectElement).selectedOptions[0]?.text?.trim() || undefined;
+  } else {
+    const val = tag === 'textarea' ? input.value.replace(/\s+$/, '') : input.value?.trim();
+    if (val) text = type === 'password' ? '•'.repeat(input.value.length) : val;
+    else if (['submit', 'reset'].includes(type)) text = DEFAULT_BUTTON_LABEL[type];
+    else {
+      text = el.getAttribute('placeholder')?.trim() || undefined;
+      isPlaceholder = !!text;
+    }
+  }
+
+  if (text) {
+    node.text = text;
+    const cb = contentBox(cs, rect);
+    const lineH = parseFloat(cs.lineHeight) || (pf(cs.fontSize) || 14) * 1.2;
+    const lines = tag === 'textarea' ? text.split('\n').length : 1;
+    const height = tag === 'textarea' ? Math.min(lines * lineH, cb.height || lines * lineH) : cb.height;
+    node.textBox = { x: round2(cb.x), y: round2(cb.y), width: round2(cb.width), height: round2(height) };
+    node.wrapBox = { x: round2(cb.x), width: round2(cb.width) };
+    node.lineCount = lines;
+    if (isPlaceholder) {
+      try {
+        const phColor = normalizeCssColor(winOf(el).getComputedStyle(el, '::placeholder').color);
+        if (phColor && phColor !== 'transparent') node.style.color = phColor;
+      } catch { /* ::placeholder not supported */ }
+    }
+  }
+
+  // 기본 모양 select 는 오른쪽에 펼침 화살표가 있다 → 글자와 화살표를 자식으로 둔다
+  if (tag === 'select' && native) {
+    const aw = 8;
+    const ah = 5;
+    const color = normalizeCssColor(cs.color);
+    const chevron: DomNodeData = {
+      tagName: 'svg',
+      svgHtml: `<svg ${SVG_NS_ATTR} width="${aw}" height="${ah}" viewBox="0 0 8 5"><path d="M1 1 L4 4 L7 1" fill="none" ` +
+        `stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      rect: { x: round2(rect.width - pf(cs.borderRightWidth) - 4 - aw), y: round2(rect.height / 2 - ah / 2), width: aw, height: ah },
+      visible: true,
+      style: plainTextStyle(cs),
+      children: [],
+    };
+    if (node.text && node.textBox) {
+      const box = node.textBox;
+      node.children.push({
+        tagName: '#text',
+        text: node.text,
+        textBox: { x: 0, y: 0, width: box.width, height: box.height },
+        wrapBox: { x: 0, width: box.width },
+        lineCount: 1,
+        rect: { ...box },
+        visible: true,
+        style: { ...plainTextStyle(cs), color: node.style.color },
+        children: [],
+      });
+      for (const k of ['text', 'textBox', 'wrapBox', 'lineCount'] as const) delete node[k];
+    }
+    node.children.push(chevron);
+  }
+  return node;
 }
 
 /**
@@ -602,10 +709,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
 
   const node: DomNodeData = { tagName: tag, rect: relRect, visible: true, style: extractStyle(cs), children: [] };
 
-  if (FORM_TAGS.has(tag)) {
-    fillFormText(el, cs, rect, node);
-    return node;
-  }
+  if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);
   if (tag === 'img') {
     node.imageUrl = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || undefined;
     return node;

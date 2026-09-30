@@ -79,6 +79,10 @@ text nodes, and vectors.
 - **Zero-size wrappers and `display: contents`** — children of zero-size absolutely positioned
   wrappers and of `display: contents` elements are kept at their real positions. Positions and sizes
   keep two decimal places, so 0.5px hairlines survive.
+- **Form controls** — input and textarea values or placeholders (with the `::placeholder` color),
+  the selected `<option>` label with its dropdown arrow, and masked passwords. Native checkboxes,
+  radios, range sliders, and color inputs are drawn as vectors, including the checked state and
+  `accent-color`.
 - **CSS color normalization** — oklch, `color(srgb ...)`, space-separated `rgb()`, and any other
   format are converted to legacy `rgb()` via a Canvas 2D round-trip.
 

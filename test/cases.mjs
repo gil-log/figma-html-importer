@@ -3,7 +3,7 @@
  * check(result, t): result.root = 생성된 루트 노드(JSON), result.roots = 전체 루트, result.done = 완료 메시지
  */
 import fs from 'node:fs';
-import { find, findText, findTextIncl, texts, solid, hasSolid, gradientHandles } from './helpers.mjs';
+import { find, all, findText, findTextIncl, texts, solid, hasSolid, gradientHandles } from './helpers.mjs';
 
 const TW = '<script src="https://cdn.tailwindcss.com"></script>';
 const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
@@ -647,6 +647,27 @@ export const cases = [
       t.ok(!findText(root, 'secret12'), 'no plain password');
       t.ok(findText(root, '••••••••'), 'masked');
     },
+  },
+  {
+    id: 'form-native-controls',
+    title: '기본 모양 체크박스·라디오·range·select 화살표가 벡터로 들어간다 (체크 상태 포함)',
+    width: 375,
+    html: '<div style="width:300px"><input type="checkbox" checked><input type="radio" checked><input type="range" value="30"><select><option>A</option></select></div>',
+    check: ({ root }, t) => {
+      const svgs = all(root, (n) => !!n.svg).map((n) => n.svg);
+      t.ok(svgs.some((v) => v.includes('<path') && v.includes('<rect')), 'checked checkbox');
+      t.ok(svgs.some((v) => (v.match(/<circle/g) || []).length === 2 && !v.includes('<rect')), 'checked radio');
+      t.ok(svgs.some((v) => (v.match(/<rect/g) || []).length === 2 && v.includes('<circle')), 'range');
+      t.ok(svgs.some((v) => v.includes('M1 1 L4 4 L7 1')), 'select chevron');
+      t.ok(findText(root, 'A'), 'select label');
+    },
+  },
+  {
+    id: 'form-textarea',
+    title: 'textarea 값의 줄바꿈이 유지된다',
+    width: 375,
+    html: '<div style="width:300px"><textarea rows="3">line1\nline2</textarea></div>',
+    check: ({ root }, t) => t.ok(findText(root, 'line1\nline2'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
   },
 
   // ── SVG ──────────────────────────────────────────────────
