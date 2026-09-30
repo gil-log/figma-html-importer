@@ -212,6 +212,17 @@ body {
   line-height: 1.5;
 }
 
+.warning-box {
+  padding: 8px 10px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #b45309;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .success-box {
   display: flex;
   align-items: center;

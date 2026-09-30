@@ -1084,4 +1084,28 @@ export const cases = [
     uiAction: { name: 'dropFile', args: ['page.html', '<p>dropped file</p>'] },
     check: ({ ui }, t) => t.eq(ui?.html, '<p>dropped file</p>', 'textarea'),
   },
+  {
+    id: 'progress-reported',
+    title: '노드가 많으면 생성 중 진행률(처리 수 / 전체 수)을 알린다',
+    width: 375,
+    html: `<div>${'<div style="height:2px;background:#ccc"></div>'.repeat(120)}</div>`,
+    check: ({ messages, done }, t) => {
+      const progress = messages.filter((m) => m.type === 'import-progress');
+      t.ok(progress.length >= 2, `progress messages ${progress.length}`);
+      t.eq(progress[0]?.total, 121, 'total nodes (루트 div + 선 120개)');
+      t.eq(done?.failedCount, 0, 'no failures');
+    },
+  },
+  {
+    id: 'failure-reported',
+    title: '일부 요소를 만들지 못해도 나머지는 만들고, 실패 개수와 오류를 완료 화면에 보여준다',
+    width: 375,
+    failText: 'boom',
+    html: '<div><p>ok text</p><p>boom</p><p>after</p></div>',
+    check: ({ root, done, uiText }, t) => {
+      t.eq(done?.failedCount, 1, 'failedCount');
+      t.ok(findText(root, 'ok text') && findText(root, 'after'), 'other texts built');
+      t.ok(uiText.includes('1개 요소를 만들지 못했습니다'), 'shown in UI');
+    },
+  },
 ];

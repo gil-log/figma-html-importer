@@ -41,7 +41,9 @@ export default function App() {
   const [intoSelection, setIntoSelection] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [progress, setProgress] = useState('');
-  const [result, setResult] = useState<{ frameCount: number; textCount: number } | null>(null);
+  const [result, setResult] = useState<{
+    frameCount: number; textCount: number; failedCount: number; firstError?: string;
+  } | null>(null);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
   const htmlRef = useRef(html);
@@ -55,7 +57,12 @@ export default function App() {
       if (!msg) return;
       if (msg.type === 'import-done') {
         setStatus('done');
-        setResult({frameCount: msg.frameCount, textCount: msg.textCount});
+        setProgress('');
+        setResult({
+          frameCount: msg.frameCount, textCount: msg.textCount, failedCount: msg.failedCount, firstError: msg.firstError,
+        });
+      } else if (msg.type === 'import-progress') {
+        setProgress(` ${msg.done} / ${msg.total}`);
       } else if (msg.type === 'import-error') {
         setStatus('error');
         setError(msg.error);
@@ -283,6 +290,11 @@ export default function App() {
               <span className="result-detail">
             Frame {result.frameCount}개 · Text {result.textCount}개
           </span>
+            </div>
+        )}
+        {status === 'done' && result && result.failedCount > 0 && (
+            <div className="warning-box">
+              <strong>{result.failedCount}개 요소를 만들지 못했습니다.</strong> {result.firstError}
             </div>
         )}
 

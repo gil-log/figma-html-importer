@@ -115,6 +115,8 @@
         get() { return s[p]; },
         set(v) {
           assertLoaded(s.fontName, 'set ' + p);
+          // 테스트용 실패 주입: 이 글자를 넣으면 Figma 가 거부한 것처럼 예외
+          if (p === 'characters' && window.__failText && v === window.__failText) throw new Error('injected failure');
           s[p] = v;
         },
       });

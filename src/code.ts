@@ -1096,8 +1096,38 @@ function tryAutoLayout(frame: FrameNode, node: DomNodeData, built: BuiltChild[])
 
 let frameCount = 0;
 let textCount = 0;
+let failedCount = 0;
+let firstError = '';
+let builtCount = 0;
+let totalCount = 0;
+
+const PROGRESS_EVERY = 50;
+
+function countNodes(node: DomNodeData): number {
+  return 1 + node.children.reduce((acc, c) => acc + countNodes(c), 0);
+}
+
+/** 노드 하나를 처리할 때마다 호출: 일정 개수마다 진행률을 보내고 Figma 가 멈추지 않도록 양보한다 */
+async function tickProgress(): Promise<void> {
+  builtCount++;
+  if (builtCount % PROGRESS_EVERY !== 0) return;
+  figma.ui.postMessage({ type: 'import-progress', done: builtCount, total: totalCount } as MainToUIMessage);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** 자식 하나를 만들고, 실패하면 나머지는 계속 만들되 실패 개수·첫 오류를 기록한다 */
+async function buildChild(child: DomNodeData, parent: FrameNode): Promise<void> {
+  try {
+    await buildTree(child, parent);
+  } catch (err: any) {
+    failedCount++;
+    if (!firstError) firstError = `<${child.tagName}> ${err?.message ?? String(err)}`;
+    console.error('[html-importer] buildTree error:', err);
+  }
+}
 
 async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
+  await tickProgress();
   const { rect, style, tagName, text, children, visible, imageUrl } = node;
   const w = Math.max(rect.width, 0.01);
   const h = Math.max(rect.height, 0.01);
@@ -1108,13 +1138,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       parent.appendChild(await createTextNode(node, 0, 0));
       textCount++;
     }
-    for (const child of children) {
-      try {
-        await buildTree(child, parent);
-      } catch (err) {
-        console.error('[html-importer] buildTree error:', err);
-      }
-    }
+    for (const child of children) await buildChild(child, parent);
     return;
   }
 
@@ -1251,11 +1275,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   const built: BuiltChild[] = [];
   for (const child of children) {
     const before = frame.children.length;
-    try {
-      await buildTree(child, frame);
-    } catch (err) {
-      console.error('[html-importer] buildTree error:', err);
-    }
+    await buildChild(child, frame);
     if (frame.children.length === before + 1) built.push({ data: child, scene: frame.children[before] });
   }
   if (importOptions.autoLayout && !node.collapsed && built.length === children.length) {
@@ -1303,7 +1323,7 @@ async function buildRoot(page: ImportPage, target: BaseNode & ChildrenMixin, mul
     // 버튼·아이콘처럼 요소 하나만 붙여넣은 경우: 루트 프레임 안에 요소 자신을 (0,0) 에 만든다
     rootFrame.fills = [];
     rootFrame.clipsContent = false;
-    await buildTree({ ...data, rect: { ...data.rect, x: 0, y: 0 } }, rootFrame);
+    await buildChild({ ...data, rect: { ...data.rect, x: 0, y: 0 } }, rootFrame);
     return rootFrame;
   }
 
@@ -1312,11 +1332,7 @@ async function buildRoot(page: ImportPage, target: BaseNode & ChildrenMixin, mul
   const built: BuiltChild[] = [];
   for (const child of data.children) {
     const before = rootFrame.children.length;
-    try {
-      await buildTree(child, rootFrame);
-    } catch (err) {
-      console.error('[html-importer] child error:', err);
-    }
+    await buildChild(child, rootFrame);
     if (rootFrame.children.length === before + 1) built.push({ data: child, scene: rootFrame.children[before] });
   }
   if (importOptions.autoLayout && built.length === data.children.length) tryAutoLayout(rootFrame, data, built);
@@ -1358,6 +1374,10 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
 
   frameCount = 0;
   textCount = 0;
+  failedCount = 0;
+  firstError = '';
+  builtCount = 0;
+  totalCount = msg.pages.reduce((acc, p) => acc + countNodes(p.data), 0);
   imageHashes.clear();
   importOptions = msg.options ?? {};
 
@@ -1391,6 +1411,8 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
       type: 'import-done',
       frameCount,
       textCount,
+      failedCount,
+      firstError: firstError || undefined,
     } as MainToUIMessage);
   } catch (err: any) {
     figma.ui.postMessage({

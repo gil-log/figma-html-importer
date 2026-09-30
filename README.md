@@ -136,7 +136,9 @@ text nodes, and vectors.
 4. **Click "Import"** — the plugin renders the HTML in an off-screen iframe, walks the DOM tree,
    serializes every element's bounding rect, measured text boxes, and computed style, fetches the
    referenced images, then sends the data to the Figma sandbox which builds the layer tree.
-5. **Edit in Figma** — the result is a normal Figma frame you can move, resize, and style.
+5. **Watch progress** — large pages report `built / total` nodes while building. If some elements
+   cannot be created, the rest is still built and the count with the first error is shown.
+6. **Edit in Figma** — the result is a normal Figma frame you can move, resize, and style.
 
 ## Limitations
 

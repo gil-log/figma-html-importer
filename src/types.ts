@@ -174,6 +174,15 @@ export interface ImportDoneMessage {
   type: 'import-done';
   frameCount: number;
   textCount: number;
+  /** 만들지 못한 노드 수와 첫 오류 (나머지는 계속 만든다) */
+  failedCount: number;
+  firstError?: string;
+}
+
+export interface ImportProgressMessage {
+  type: 'import-progress';
+  done: number;
+  total: number;
 }
 
 export interface ImportErrorMessage {
@@ -186,4 +195,4 @@ export interface SettingsMessage {
   settings: PluginSettings | null;
 }
 
-export type MainToUIMessage = ImportDoneMessage | ImportErrorMessage | SettingsMessage;
+export type MainToUIMessage = ImportDoneMessage | ImportProgressMessage | ImportErrorMessage | SettingsMessage;

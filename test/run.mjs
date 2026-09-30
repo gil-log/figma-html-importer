@@ -97,8 +97,8 @@ for (const c of selected) {
   try {
     const steps = c.sequence || (c.html ? [c] : []);
     let res = { roots: [], selected: [] };
-    for (const { html, width, theme, options, selectFrame } of steps) {
-      res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame });
+    for (const { html, width, theme, options, selectFrame, failText } of steps) {
+      res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame, failText });
     }
     // 가져오기 뒤 UI 동작 (새로 띄우기·파일 끌어놓기 등)
     if (c.uiAction) res.ui = await page.evaluate(({ name, args }) => window[name](...args), c.uiAction);
