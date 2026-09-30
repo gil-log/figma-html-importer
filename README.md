@@ -33,6 +33,9 @@ text nodes, and vectors.
   are drawn in the same direction as the browser (angles, side/corner keywords, non-square boxes);
   radial gradients keep their center, shape, and size keyword (`closest-side`, `farthest-corner`, …).
   Color stops can be percentages, px, or angles.
+- **Modern color syntax** — `oklch()`, `oklab()`, `color()`, and `color-mix()` (Tailwind v4's
+  default palette) in backgrounds, gradients (including `in oklab` interpolation hints), shadows,
+  borders, and SVG paints are converted to colors Figma understands.
 - **Gradient text** — `background-clip: text` with transparent text becomes a gradient text fill.
 - **Borders** — per-side widths and colors with inside stroke alignment; `dashed` and `dotted`
   borders become dashed strokes.
@@ -78,8 +81,8 @@ text nodes, and vectors.
 - **SVG vector import** — `<svg>` elements are passed to `createNodeFromSvg` for native Figma
   vectors.
 - **CSS-styled icons** — `fill`, `stroke`, `stroke-width`, opacity, and friends set from CSS
-  (classes, `<style>`, Tailwind `fill-*`/`stroke-*`, inherited `color` for `currentColor`) are
-  written onto the SVG so Figma draws the same colors. SVGs without a `viewBox` keep their
+  (classes, `<style>`, Tailwind `fill-*`/`stroke-*`, inherited `color` for `currentColor`, CSS
+  variables) are written onto the SVG so Figma draws the same colors. SVGs without a `viewBox` keep their
   coordinate system when resized with CSS.
 - **`<use>` inlining** — sprite references are resolved (symbol `viewBox`, `x`/`y` offsets, and
   references to plain elements), and gradients or clip paths defined in another SVG's `<defs>` are

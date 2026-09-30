@@ -303,6 +303,14 @@ function splitTopLevelCommas(s: string): string[] {
   return parts;
 }
 
+/**
+ * 그라디언트 첫 인자에서 색 보간 공간 구문("in oklab", "in oklch longer hue")을 뺀다.
+ * Figma 는 보간 공간을 지정할 수 없으므로 방향·모양만 남긴다 (Tailwind v4 가 기본으로 붙인다).
+ */
+function stripInterpolation(part: string): string {
+  return part.replace(/\bin\s+[a-z0-9-]+(\s+(shorter|longer|increasing|decreasing)\s+hue)?/i, '').replace(/\s+/g, ' ').trim();
+}
+
 /** CSS 각도 문자열(deg/turn/rad/grad) → deg. 각도가 아니면 null */
 function parseAngle(s: string): number | null {
   const m = s.trim().match(/^(-?[\d.]+)(deg|turn|rad|grad)$/i);
@@ -389,9 +397,11 @@ function parseLinearGradient(css: string, w: number, h: number): GradientPaint |
   const H = Math.max(h, 1);
   let angleDeg = 180; // 방향 생략 = to bottom (Chrome 은 기본 방향을 computed 값에서 생략한다)
   let stopParts = parts;
-  const first = parts[0].trim().toLowerCase();
+  const first = stripInterpolation(parts[0]).toLowerCase();
   const angle = parseAngle(first);
-  if (angle !== null) {
+  if (first === '') {
+    stopParts = parts.slice(1); // "in oklab" 만 있는 경우
+  } else if (angle !== null) {
     angleDeg = angle;
     stopParts = parts.slice(1);
   } else if (first.startsWith('to ')) {
@@ -476,7 +486,7 @@ function parseRadialGradient(css: string, w: number, h: number): GradientPaint |
   const parts = splitTopLevelCommas(m[1]);
   const W = Math.max(w, 1);
   const H = Math.max(h, 1);
-  const first = parts[0].trim().toLowerCase();
+  const first = stripInterpolation(parts[0]).toLowerCase();
   const hasSpec = !/^(rgba?\(|color\(|#|transparent)/.test(first);
   const spec = hasSpec ? first : '';
   const stopParts = hasSpec ? parts.slice(1) : parts;
@@ -545,8 +555,8 @@ function parseConicGradient(css: string, w: number, h: number): GradientPaint | 
   const parts = splitTopLevelCommas(m[1]);
   const W = Math.max(w, 1);
   const H = Math.max(h, 1);
-  const first = parts[0].trim().toLowerCase();
-  const hasSpec = /^(from|at)\b/.test(first);
+  const first = stripInterpolation(parts[0]).toLowerCase();
+  const hasSpec = first === '' || /^(from|at)\b/.test(first);
   const spec = hasSpec ? first : '';
   const stopParts = hasSpec ? parts.slice(1) : parts;
   const from = parseAngle(spec.match(/from\s+(\S+)/)?.[1] ?? '0deg') ?? 0;

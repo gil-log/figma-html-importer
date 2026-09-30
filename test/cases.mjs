@@ -1108,4 +1108,59 @@ export const cases = [
       t.ok(uiText.includes('1개 요소를 만들지 못했습니다'), 'shown in UI');
     },
   },
+  // ── 2차 점검 ─────────────────────────────────────────────
+  {
+    id: 'oklch-gradient-shadow',
+    title: 'oklch 등 최신 색 표기의 그라디언트·그림자·테두리도 들어간다 (Tailwind v4 기본 색)',
+    width: 375,
+    html: '<div style="padding:20px"><div style="width:100px;height:40px;background:linear-gradient(to right, oklch(0.62 0.21 260), oklch(0.65 0.24 16));box-shadow:0 4px 8px oklch(0 0 0 / 0.3);border:2px solid oklch(0.7 0.15 150)"></div></div>',
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 104);
+      t.eq(f?.fills?.[0]?.type, 'GRADIENT_LINEAR', 'gradient');
+      t.eq(f?.effects?.[0]?.type, 'DROP_SHADOW', 'shadow');
+      t.ok((f?.strokes || []).length === 1, 'border');
+    },
+  },
+  {
+    id: 'oklch-svg-fill',
+    title: 'oklch 로 칠한 SVG 아이콘은 Figma 가 읽을 수 있는 rgb 로 들어간다',
+    width: 375,
+    html: '<div><svg width="20" height="20" viewBox="0 0 10 10" style="color:oklch(0.62 0.21 260)"><path d="M0 0h10v10H0z" fill="currentColor"/></svg></div>',
+    check: ({ root }, t) => {
+      const svg = find(root, (n) => !!n.svg)?.svg || '';
+      t.ok(!/oklch|oklab|color\(/.test(svg), `no modern color syntax: ${svg.slice(0, 160)}`);
+      t.ok(/fill="rgb/.test(svg), 'rgb fill');
+    },
+  },
+  {
+    id: 'tailwind-v4',
+    title: 'Tailwind v4 브라우저 CDN 으로 만든 화면(oklch 색·그라디언트)이 들어간다',
+    width: 375,
+    html: '<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><div class="p-4"><div class="h-10 w-40 rounded-xl bg-gradient-to-r from-blue-500 to-pink-500 shadow-lg"></div><p class="mt-2 text-blue-600 font-semibold">v4 text</p></div>',
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 160);
+      t.eq(f?.fills?.[0]?.type, 'GRADIENT_LINEAR', 'gradient');
+      t.ok((f?.effects || []).length >= 1, 'shadow');
+      const txt = findText(root, 'v4 text');
+      t.ok(txt && solid(txt) && solid(txt)[2] > 150, `blue text ${JSON.stringify(txt && solid(txt))}`);
+    },
+  },
+  {
+    id: 'pseudo-attr-content',
+    title: 'content: attr(data-count) 가상요소 글자(알림 숫자 배지)가 들어간다',
+    width: 375,
+    html: '<style>.badge{position:relative;width:30px;height:30px;background:#ddd}.badge::after{content:attr(data-count);position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 4px;background:red;color:#fff;font-size:10px;line-height:16px;border-radius:8px;text-align:center}</style><div style="padding:10px"><div class="badge" data-count="12"></div></div>',
+    check: ({ root }, t) => t.ok(findText(root, '12'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
+  },
+  {
+    id: 'svg-style-attr-var',
+    title: 'SVG style 속성의 CSS 변수(var())는 계산된 색으로 바뀐다',
+    width: 375,
+    html: '<style>:root{--brand:rgb(255, 0, 0)}</style><div><svg width="20" height="20" viewBox="0 0 10 10"><path d="M0 0h10v10H0z" style="fill:var(--brand)"/></svg></div>',
+    check: ({ root }, t) => {
+      const svg = find(root, (n) => !!n.svg)?.svg || '';
+      t.ok(!svg.includes('var('), `no var(): ${svg}`);
+      t.ok(svg.includes('rgb(255, 0, 0)'), 'resolved color');
+    },
+  },
 ];

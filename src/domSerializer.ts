@@ -78,6 +78,35 @@ function normalizeCssColor(css: string): string {
   }
 }
 
+// 계산값에 그대로 남는 최신 색 표기 (Tailwind v4 는 oklch·oklab 을 기본으로 쓴다)
+const COLOR_FN = /\b(oklch|oklab|lab|lch|hwb|color-mix|color|rgba?|hsla?)\(/gi;
+const NEEDS_COLOR_NORMALIZE = /\b(oklch|oklab|lab|lch|hwb|color-mix|color)\(|\brgba?\(\s*[\d.]+%?\s+[\d.]/i;
+
+/**
+ * 그라디언트·그림자·필터 문자열 안의 색 함수를 legacy rgb()/rgba() 로 바꾼다.
+ * Figma 쪽 파서와 SVG 파서는 oklch·color(display-p3 …) 등을 읽지 못한다.
+ */
+function normalizeColorsIn(value: string): string {
+  if (!value || !NEEDS_COLOR_NORMALIZE.test(value)) return value;
+  let out = '';
+  let last = 0;
+  COLOR_FN.lastIndex = 0;
+  for (let m = COLOR_FN.exec(value); m; m = COLOR_FN.exec(value)) {
+    // 괄호 짝을 맞춰 함수 전체를 잘라낸다 (color-mix 안의 oklch 처럼 중첩될 수 있다)
+    let depth = 0;
+    let end = m.index + m[0].length - 1;
+    for (; end < value.length; end++) {
+      if (value[end] === '(') depth++;
+      else if (value[end] === ')' && --depth === 0) break;
+    }
+    const fn = value.slice(m.index, end + 1);
+    out += value.slice(last, m.index) + normalizeCssColor(fn);
+    last = end + 1;
+    COLOR_FN.lastIndex = last;
+  }
+  return out + value.slice(last);
+}
+
 /**
  * borderColor / borderStyle 단축 속성은 개별 면 값이 다를 때
  * "rgba(0,0,0,0) rgba(0,0,0,0) rgb(x,y,z) rgba(0,0,0,0)" 같은 4값 문자열로 반환된다.
@@ -357,11 +386,11 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
       // background-clip: text → 그라디언트가 텍스트 색상용이므로 배경에서 제외
       const bgClip = (cs as any).webkitBackgroundClip || cs.backgroundClip;
       if (bgClip === 'text') return '';
-      return cs.backgroundImage || '';
+      return normalizeColorsIn(cs.backgroundImage || '');
     })(),
     textFillImage: (() => {
       const bgClip = (cs as any).webkitBackgroundClip || cs.backgroundClip;
-      return bgClip === 'text' && cs.backgroundImage !== 'none' ? cs.backgroundImage : '';
+      return bgClip === 'text' && cs.backgroundImage !== 'none' ? normalizeColorsIn(cs.backgroundImage) : '';
     })(),
     backgroundSize: cs.backgroundSize,
     backgroundRepeat: cs.backgroundRepeat,
@@ -389,9 +418,9 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     borderStyle: effectiveBorderStyle(cs),
     // opacity:0 도 그대로 살려야 하므로 pf() || 1 로 쓰지 않는다
     opacity: cs.opacity === '' ? 1 : parseFloat(cs.opacity),
-    boxShadow: cs.boxShadow,
-    textShadow: cs.textShadow,
-    filter: cs.filter,
+    boxShadow: normalizeColorsIn(cs.boxShadow),
+    textShadow: normalizeColorsIn(cs.textShadow),
+    filter: normalizeColorsIn(cs.filter),
     backdropFilter: (cs as any).backdropFilter || (cs as any).webkitBackdropFilter || 'none',
     mixBlendMode: cs.mixBlendMode,
     overflow: cs.overflow,
@@ -1151,11 +1180,18 @@ const SVG_PAINT_PROPS: [cssProp: string, attr: string, initial: string][] = [
   ['strokeDasharray', 'stroke-dasharray', 'none'],
   ['strokeMiterlimit', 'stroke-miterlimit', '4'],
   ['opacity', 'opacity', '1'],
+  ['stopColor', 'stop-color', 'rgb(0, 0, 0)'],
+  ['stopOpacity', 'stop-opacity', '1'],
 ];
+// 상속되지 않는 속성은 부모 값이 아니라 초기값과 비교한다
+const SVG_NON_INHERITED = new Set(['opacity', 'stopColor', 'stopOpacity']);
+const SVG_COLOR_PROPS = new Set(['fill', 'stroke', 'stopColor']);
 
 function svgValue(cssProp: string, v: string): string {
   // stroke-width 는 단위 없는 숫자로 (Figma 는 "2px" 를 해석하지 못할 수 있다)
   if (cssProp === 'strokeWidth' || cssProp === 'strokeMiterlimit') return String(pf(v));
+  // oklch 등은 Figma SVG 파서가 읽지 못하므로 rgb 로
+  if (SVG_COLOR_PROPS.has(cssProp) && v && v !== 'none' && !v.startsWith('url(')) return normalizeCssColor(v);
   return v;
 }
 
@@ -1174,15 +1210,45 @@ function inlineSvgStyles(orig: Element, clone: Element, win: Window, parentValue
     const v = svgValue(prop, (cs as any)[prop] as string);
     values[prop] = v;
     if (!v || v.startsWith('url(')) continue;
-    const inherited = parentValues ? parentValues[prop] : svgValue(prop, initial);
-    // opacity 는 상속되지 않으므로 기본값과만 비교한다
-    const base = prop === 'opacity' ? '1' : inherited;
+    const base = SVG_NON_INHERITED.has(prop) || !parentValues ? svgValue(prop, initial) : parentValues[prop];
     if (v !== base || (clone.hasAttribute(attr) && clone.getAttribute(attr) !== v)) clone.setAttribute(attr, v);
   }
   const origKids = Array.from(orig.children);
   const cloneKids = Array.from(clone.children);
   for (let i = 0; i < origKids.length && i < cloneKids.length; i++) {
     inlineSvgStyles(origKids[i], cloneKids[i], win, values);
+  }
+}
+
+const SVG_INLINED_ATTRS = new Set(SVG_PAINT_PROPS.map(([, attr]) => attr));
+const SVG_COLOR_ATTRS = ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color', 'color'];
+
+/**
+ * Figma SVG 파서가 읽지 못하는 값 정리.
+ * - style 속성: 계산값을 이미 속성으로 옮긴 선언과 var() 선언은 지우고, 나머지 색은 rgb 로
+ * - 색 속성(<use> 로 복사해 온 내용 등): var() 는 지우고 oklch 등은 rgb 로
+ */
+function cleanSvgValues(root: Element): void {
+  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    const style = el.getAttribute('style');
+    if (style !== null) {
+      const kept = style.split(';').map((d) => d.trim()).filter(Boolean).flatMap((decl) => {
+        const i = decl.indexOf(':');
+        if (i < 0) return [];
+        const prop = decl.slice(0, i).trim().toLowerCase();
+        const value = decl.slice(i + 1).trim();
+        if (SVG_INLINED_ATTRS.has(prop) || value.includes('var(')) return [];
+        return [`${prop}:${prop === 'color' ? normalizeCssColor(value) : normalizeColorsIn(value)}`];
+      });
+      if (kept.length) el.setAttribute('style', kept.join(';'));
+      else el.removeAttribute('style');
+    }
+    for (const attr of SVG_COLOR_ATTRS) {
+      const v = el.getAttribute(attr);
+      if (v === null) continue;
+      if (v.includes('var(')) el.removeAttribute(attr);
+      else if (NEEDS_COLOR_NORMALIZE.test(v)) el.setAttribute(attr, normalizeColorsIn(v));
+    }
   }
 }
 
@@ -1273,8 +1339,10 @@ function serializeSvg(svgEl: SVGElement, cs: CSSStyleDeclaration): string {
     clone.setAttribute('viewBox', `0 0 ${attrLen('width', pw)} ${attrLen('height', ph)}`);
   }
 
+  cleanSvgValues(clone);
+
   // currentColor → 실제 색상 치환 (<use> 로 가져온 symbol 내용 등 계산 스타일이 없는 부분)
-  const computedColor = cs.color || 'black';
+  const computedColor = normalizeCssColor(cs.color || 'black');
   let svgHtml = clone.outerHTML.replace(/currentColor/gi, computedColor);
 
   // width/height를 항상 DOM 실제 픽셀값으로 교체
