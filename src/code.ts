@@ -734,7 +734,10 @@ function applyStrokes(frame: FrameNode, s: DomStyleData): void {
   const paint = toSolidPaint(s.borderColor);
   if (!paint) return;
   frame.strokes = [paint];
-  frame.strokeAlign = 'INSIDE';
+  // border-collapse 표: 이웃 칸과 공유하는 선이 격자선 가운데에 한 번 그려지고 칸 상자는 선의 절반씩을 포함한다
+  // → 가운데 정렬이면 겹치는 두 칸의 선이 한 줄로 보인다 (INSIDE 면 두 겹으로 두꺼워진다)
+  const collapsed = s.borderCollapse === 'collapse' && /^table(-cell)?$/.test(s.display);
+  frame.strokeAlign = collapsed ? 'CENTER' : 'INSIDE';
 
   const isUniform =
     s.borderTopWidth === s.borderRightWidth &&

@@ -36,6 +36,7 @@ export interface DomStyleData {
   borderBottomColor: string;
   borderLeftColor: string;
   borderStyle: string;
+  borderCollapse: string;
 
   // 기타 시각
   opacity: number;

@@ -1210,4 +1210,18 @@ export const cases = [
       t.ok(svg.includes('rgb(255, 0, 0)'), 'resolved color');
     },
   },
+  {
+    id: 'table-collapse-borders',
+    title: 'border-collapse 표의 칸 테두리가 두 겹으로 두꺼워지지 않는다',
+    width: 375,
+    html: '<table style="border-collapse:collapse"><tr><td style="border:1px solid rgb(0, 0, 0);width:50px;height:20px">a</td><td style="border:1px solid rgb(0, 0, 0);width:50px;height:20px">b</td></tr></table>',
+    check: ({ root }, t) => {
+      const cells = all(root, (n) => n.type === 'FRAME' && (n.strokes || []).length > 0);
+      t.eq(cells.length, 2, 'two cells');
+      // 칸 경계가 맞닿아 있고(Chrome 은 공유선의 절반씩을 칸에 포함) 선이 가운데 정렬이면 겹쳐 한 줄로 보인다
+      const [a, b] = cells.sort((x, y) => x.ax - y.ax);
+      t.near(a && b && b.ax - (a.ax + a.width), 0, 0.01, 'cells touch');
+      t.eq(cells.map((c) => c.strokeAlign), ['CENTER', 'CENTER'], 'center aligned');
+    },
+  },
 ];

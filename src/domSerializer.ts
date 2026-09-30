@@ -422,6 +422,7 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     borderBottomColor: normalizeCssColor(cs.borderBottomColor),
     borderLeftColor: normalizeCssColor(cs.borderLeftColor),
     borderStyle: effectiveBorderStyle(cs),
+    borderCollapse: cs.borderCollapse,
     // opacity:0 도 그대로 살려야 하므로 pf() || 1 로 쓰지 않는다
     opacity: cs.opacity === '' ? 1 : parseFloat(cs.opacity),
     boxShadow: normalizeColorsIn(cs.boxShadow),
