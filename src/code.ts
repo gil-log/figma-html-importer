@@ -1368,7 +1368,8 @@ async function buildRoot(page: ImportPage, target: BaseNode & ChildrenMixin, mul
   rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
   target.appendChild(rootFrame);
 
-  const isLeaf = (!!data.text && data.children.length === 0) || data.tagName === 'svg' || data.tagName === 'img';
+  const isLeaf = (!!data.text && data.children.length === 0) ||
+    ['svg', 'img', 'canvas', 'video'].includes(data.tagName);
   if (isLeaf) {
     // 버튼·아이콘처럼 요소 하나만 붙여넣은 경우: 루트 프레임 안에 요소 자신을 (0,0) 에 만든다
     rootFrame.fills = [];

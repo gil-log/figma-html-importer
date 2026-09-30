@@ -1193,6 +1193,13 @@ export const cases = [
     },
   },
   {
+    id: 'root-canvas',
+    title: 'canvas 하나만 붙여넣어도 그려진 내용이 이미지로 들어간다',
+    width: 375,
+    html: '<canvas id="c" width="30" height="20" style="display:block"></canvas><script>document.getElementById("c").getContext("2d").fillRect(0,0,30,20)</script>',
+    check: ({ root }, t) => t.ok(imageFill(find(root, (n) => n.type === 'RECTANGLE')), 'image fill'),
+  },
+  {
     id: 'pseudo-attr-content',
     title: 'content: attr(data-count) 가상요소 글자(알림 숫자 배지)가 들어간다',
     width: 375,
