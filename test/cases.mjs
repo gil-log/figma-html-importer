@@ -640,6 +640,30 @@ export const cases = [
     },
   },
 
+  {
+    id: 'list-ordered',
+    title: '번호 목록은 start·value 를 반영한 번호가 들어간다',
+    width: 375,
+    html: '<ol start="3" style="padding-left:30px;margin:0;width:200px"><li>Three</li><li value="7">Seven</li><li>Eight</li></ol>',
+    check: ({ root }, t) => {
+      for (const n of ['3.', '7.', '8.']) t.ok(findText(root, n), `marker ${n}`);
+      const m = findText(root, '3.');
+      const three = findText(root, 'Three');
+      if (m && three) t.ok(m.ax + m.width <= three.ax, 'marker left of text');
+    },
+  },
+  {
+    id: 'pseudo-after-required',
+    title: '라벨 뒤 ::after 필수 표시(*)가 글자 바로 오른쪽에 들어간다',
+    width: 375,
+    html: '<style>.req::after{content:"*";color:red;margin-left:2px}</style><div style="width:300px"><label class="req" style="display:block">이름</label></div>',
+    check: ({ root }, t) => {
+      const star = findText(root, '*');
+      const label = findText(root, '이름');
+      t.ok(star && hasSolid(star, [255, 0, 0]), 'red star');
+      if (star && label) t.near(star.ax, label.ax + label.width + 2, 3, 'star right after label');
+    },
+  },
   // ── 폼 ───────────────────────────────────────────────────
   {
     id: 'form-checkbox',

@@ -77,8 +77,13 @@ text nodes, and vectors.
 
 ### Advanced DOM Handling
 
-- **Pseudo-elements** — `::before` and `::after` with backgrounds, gradients, or border-radius (
-  e.g., radio-button dots) are extracted as virtual child nodes.
+- **Pseudo-elements** — `::before` and `::after` with backgrounds, gradients, or border-radius
+  (e.g., radio-button dots, notification badges) are extracted as virtual child nodes, including
+  `translate()` centering. Inline text content (bullets, arrows, the `*` after a required label) is
+  placed right before the first line or right after the last line of the element's text.
+- **List markers** — `list-style-type` bullets (`disc`, `circle`, `square`) and numbers (`decimal`,
+  alphabetic, roman, custom strings) appear next to each item, honoring `<ol start>`, `<li value>`,
+  `reversed`, and `list-style-position`.
 - **Mixed content** — `<p>text <strong>bold</strong><br>text</p>` becomes a single Figma text node
   with styled ranges and line breaks. Inline pieces that draw their own box — badges with a
   background, icons, `inline-block` or `display: block` children — stay separate layers at their

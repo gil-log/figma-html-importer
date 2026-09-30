@@ -87,44 +87,141 @@ function effectiveBorderStyle(cs: CSSStyleDeclaration): string {
   return cs.borderStyle;
 }
 
+// ─── 가상 요소 (::before / ::after / ::marker) ─────────────────
+
+/** content 계산값의 따옴표 문자열만 이어 붙인다 ("a" "b" → ab). counter()·attr() 등은 undefined */
+function contentText(content: string): string | undefined {
+  const parts = content.match(/"(?:[^"\\]|\\.)*"/g);
+  if (!parts || parts.join(' ').length !== content.trim().length) return undefined;
+  return parts.map((p) => p.slice(1, -1).replace(/\\(.)/g, '$1')).join('');
+}
+
+// 아이콘 폰트 글리프(사설 영역)는 Figma 글꼴로 그릴 수 없다
+const isIconGlyph = (text: string) => /[\uE000-\uF8FF]/.test(text);
+
+const _measureCanvas = document.createElement('canvas').getContext('2d')!;
+function measureTextWidth(text: string, cs: CSSStyleDeclaration): number {
+  _measureCanvas.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  return _measureCanvas.measureText(text).width + Math.max(0, text.length - 1) * pf(cs.letterSpacing);
+}
+
+interface LineBox { left: number; right: number; top: number; bottom: number }
+
+/** 요소 안 실제 글자의 첫 줄·마지막 줄 상자 (가상 요소는 Range 에 잡히지 않는다) */
+function textLines(el: Element): { first: LineBox; last: LineBox } | null {
+  const range = el.ownerDocument.createRange();
+  range.selectNodeContents(el);
+  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0.5 && r.height > 0.5);
+  if (rects.length === 0) return null;
+  const top = Math.min(...rects.map((r) => r.top));
+  const bottom = Math.max(...rects.map((r) => r.bottom));
+  const firstRow = rects.filter((r) => r.top < top + r.height / 2);
+  const lastRow = rects.filter((r) => r.bottom > bottom - r.height / 2);
+  const box = (row: DOMRect[]): LineBox => ({
+    left: Math.min(...row.map((r) => r.left)),
+    right: Math.max(...row.map((r) => r.right)),
+    top: Math.min(...row.map((r) => r.top)),
+    bottom: Math.max(...row.map((r) => r.bottom)),
+  });
+  return { first: box(firstRow), last: box(lastRow) };
+}
+
+/** 가상 요소 글자 → 정렬 기준점(before 는 오른쪽 끝, after 는 왼쪽 끝)에 맞춰 배치되는 텍스트 노드 */
+function pseudoTextNode(
+  tagName: string, text: string, pcs: CSSStyleDeclaration, anchorX: number, centerY: number, align: 'right' | 'left',
+): DomNodeData {
+  const w = measureTextWidth(text, pcs);
+  const h = parseFloat(pcs.lineHeight) || (pf(pcs.fontSize) || 14) * 1.2;
+  const x = align === 'right' ? anchorX - w : anchorX;
+  return {
+    tagName,
+    text,
+    textBox: { x: 0, y: 0, width: round2(w), height: round2(h) },
+    lineCount: 1,
+    rect: { x: round2(x), y: round2(centerY - h / 2), width: round2(w), height: round2(h) },
+    visible: true,
+    style: { ...plainTextStyle(pcs), textAlign: align },
+    children: [],
+  };
+}
+
+/** 이동만 있는 transform(translate(-50%, -50%) 가운데 정렬 등)의 이동량 */
+function translationOf(transform: string): [number, number] {
+  const m = parseMatrix(transform);
+  return m ? [m[4], m[5]] : [0, 0];
+}
+
 /**
- * CSS ::before / ::after 의사 요소를 가상 자식 노드로 추출.
- * position:absolute인 경우 부모 기준 위치를 계산한다.
+ * CSS ::before / ::after 의사 요소를 가상 자식 노드로 추출 (좌표는 호스트 border box 기준).
+ * - position:absolute/fixed → left/top(+ translate) 으로 배치된 박스
+ * - 인라인 글자(불릿·화살표·필수 표시 *) → 호스트 글자의 첫 줄 앞 / 마지막 줄 뒤
+ * - 그 외 크기 있는 박스 → content box 시작점
  */
 function extractPseudoElement(
   el: Element,
   pseudo: '::before' | '::after',
 ): DomNodeData | null {
   try {
-    const pcs = winOf(el).getComputedStyle(el, pseudo);
+    const win = winOf(el);
+    const pcs = win.getComputedStyle(el, pseudo);
     const content = pcs.content;
     if (!content || content === 'none' || content === 'normal') return null;
     if (pcs.display === 'none') return null;
 
+    const text = contentText(content);
+    if (text && isIconGlyph(text)) return null;
+    const hostRect = el.getBoundingClientRect();
+    const hostCs = win.getComputedStyle(el);
+    const positioned = pcs.position === 'absolute' || pcs.position === 'fixed';
+    const inline = !positioned && pcs.display.startsWith('inline');
+
+    if (inline && text && text.trim() && pcs.display === 'inline') {
+      const lines = textLines(el);
+      const cb = contentBox(hostCs, hostRect);
+      const marginAfterBefore = pf(pcs.marginRight);
+      const marginBeforeAfter = pf(pcs.marginLeft);
+      if (pseudo === '::before') {
+        const anchor = lines ? lines.first.left - hostRect.left - marginAfterBefore : cb.x + measureTextWidth(text, pcs);
+        const cy = lines ? (lines.first.top + lines.first.bottom) / 2 - hostRect.top : cb.y + cb.height / 2;
+        return pseudoTextNode(pseudo, text, pcs, anchor, cy, 'right');
+      }
+      const anchor = lines ? lines.last.right - hostRect.left + marginBeforeAfter : cb.x;
+      const cy = lines ? (lines.last.top + lines.last.bottom) / 2 - hostRect.top : cb.y + cb.height / 2;
+      return pseudoTextNode(pseudo, text, pcs, anchor, cy, 'left');
+    }
+
     const w = pf(pcs.width);
     const h = pf(pcs.height);
-    if (w < 1 || h < 1) return null;
+    if (w < 0.01 || h < 0.01) return null;
 
     let x = 0;
     let y = 0;
-    if (pcs.position === 'absolute' || pcs.position === 'fixed') {
-      const elCs = winOf(el).getComputedStyle(el);
-      const bl = pf(elCs.borderLeftWidth);
-      const bt = pf(elCs.borderTopWidth);
-      x = bl + (pcs.left !== 'auto' ? pf(pcs.left) : 0);
-      y = bt + (pcs.top !== 'auto' ? pf(pcs.top) : 0);
-    }
-
-    // CSS content 속성에서 텍스트 추출 (예: content: "•")
-    let text: string | undefined;
-    const textMatch = content.match(/^"(.*)"$/);
-    if (textMatch && textMatch[1]) {
-      text = textMatch[1];
+    if (positioned) {
+      const bl = pf(hostCs.borderLeftWidth);
+      const bt = pf(hostCs.borderTopWidth);
+      const [tx, ty] = translationOf(pcs.transform);
+      x = bl + (pcs.left !== 'auto' ? pf(pcs.left) : 0) + tx;
+      y = bt + (pcs.top !== 'auto' ? pf(pcs.top) : 0) + ty;
+    } else if (inline) {
+      // 크기 있는 인라인 박스(점·아이콘 자리): 글자 첫 줄 앞 / 마지막 줄 뒤, 세로 가운데
+      const lines = textLines(el);
+      const cb = contentBox(hostCs, hostRect);
+      if (pseudo === '::before') {
+        x = lines ? lines.first.left - hostRect.left - pf(pcs.marginRight) - w : cb.x;
+        y = lines ? (lines.first.top + lines.first.bottom) / 2 - hostRect.top - h / 2 : cb.y;
+      } else {
+        x = lines ? lines.last.right - hostRect.left + pf(pcs.marginLeft) : cb.x;
+        y = lines ? (lines.last.top + lines.last.bottom) / 2 - hostRect.top - h / 2 : cb.y;
+      }
+    } else {
+      const cb = contentBox(hostCs, hostRect);
+      x = cb.x;
+      y = cb.y;
     }
 
     const style = extractStyle(pcs);
     applyRadii(style, pcs, w, h);
-    return {
+    const node: DomNodeData = {
       tagName: pseudo,
       text: text || undefined,
       rect: {
@@ -137,9 +234,88 @@ function extractPseudoElement(
       style,
       children: [],
     };
+    if (text) {
+      // 박스 안 글자(숫자 배지 등)는 content box 안에 정렬
+      const pad = contentBox(pcs, new DOMRect(0, 0, w, h));
+      node.textBox = { x: round2(pad.x), y: round2(pad.y), width: round2(pad.width), height: round2(pad.height) };
+      node.lineCount = 1;
+    }
+    return node;
   } catch {
     return null;
   }
+}
+
+const MARKER_GLYPHS: Record<string, string> = { disc: '•', circle: '◦', square: '▪' };
+
+function toRoman(n: number): string {
+  const table: [number, string][] = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'],
+    [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
+  let out = '';
+  for (const [v, s] of table) while (n >= v) { out += s; n -= v; }
+  return out;
+}
+
+function toAlpha(n: number): string {
+  let out = '';
+  while (n > 0) { n--; out = String.fromCharCode(97 + (n % 26)) + out; n = Math.floor(n / 26); }
+  return out;
+}
+
+/** <li> 의 번호 (ol start·reversed, li value 반영) */
+function listOrdinal(el: Element, win: Window): number {
+  const list = el.parentElement;
+  const items = list
+    ? Array.from(list.children).filter((c) => win.getComputedStyle(c).display === 'list-item')
+    : [el];
+  const reversed = list?.tagName.toLowerCase() === 'ol' && list.hasAttribute('reversed');
+  const startAttr = list?.getAttribute('start');
+  let n = startAttr !== null && startAttr !== undefined ? parseInt(startAttr, 10) : reversed ? items.length : 1;
+  for (const item of items) {
+    const value = item.getAttribute('value');
+    if (value !== null && item.tagName.toLowerCase() === 'li') n = parseInt(value, 10);
+    if (item === el) return n;
+    n += reversed ? -1 : 1;
+  }
+  return n;
+}
+
+function markerText(type: string, n: number): string | undefined {
+  if (type.startsWith('"')) return contentText(type)?.trim();
+  if (MARKER_GLYPHS[type]) return MARKER_GLYPHS[type];
+  switch (type) {
+    case 'decimal-leading-zero': return `${n < 10 ? '0' : ''}${n}.`;
+    case 'lower-alpha':
+    case 'lower-latin': return `${toAlpha(n)}.`;
+    case 'upper-alpha':
+    case 'upper-latin': return `${toAlpha(n).toUpperCase()}.`;
+    case 'lower-roman': return `${toRoman(n)}.`;
+    case 'upper-roman': return `${toRoman(n).toUpperCase()}.`;
+    default: return `${n}.`; // decimal 및 그 외 번호 체계
+  }
+}
+
+/**
+ * 목록 기호(::marker) → 텍스트 노드.
+ * outside 는 content box 왼쪽 바깥, inside 는 첫 줄 글자 앞에 오른쪽 끝을 맞춘다 (기호 뒤 공백만큼 띄움).
+ */
+function extractListMarker(el: Element, cs: CSSStyleDeclaration): DomNodeData | null {
+  if (cs.display !== 'list-item' || cs.listStyleType === 'none' || (cs.listStyleImage && cs.listStyleImage !== 'none')) {
+    return null;
+  }
+  const win = winOf(el);
+  const text = markerText(cs.listStyleType, listOrdinal(el, win));
+  if (!text) return null;
+  const mcs = win.getComputedStyle(el, '::marker');
+  const hostRect = el.getBoundingClientRect();
+  const cb = contentBox(cs, hostRect);
+  const lines = textLines(el);
+  const gap = measureTextWidth(' ', mcs);
+  const anchor = cs.listStylePosition === 'inside' && lines
+    ? lines.first.left - hostRect.left - gap
+    : cb.x - gap;
+  const cy = lines ? (lines.first.top + lines.first.bottom) / 2 - hostRect.top : cb.y + (parseFloat(cs.lineHeight) || 16) / 2;
+  return pseudoTextNode('::marker', text, mcs, anchor, cy, 'right');
 }
 
 /**
@@ -835,10 +1011,12 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
     }
   }
 
-  // ::before / ::after 의사 요소 추출 (display:contents 는 기준이 될 박스가 없다)
+  // ::marker / ::before / ::after 가상 요소 추출 (display:contents 는 기준이 될 박스가 없다)
   if (!isContents) {
     const pseudoBefore = extractPseudoElement(el, '::before');
     if (pseudoBefore) node.children.unshift(pseudoBefore);
+    const marker = extractListMarker(el, cs);
+    if (marker) node.children.unshift(marker);
     const pseudoAfter = extractPseudoElement(el, '::after');
     if (pseudoAfter) node.children.push(pseudoAfter);
   }
