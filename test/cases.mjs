@@ -26,6 +26,40 @@ export const cases = [
     },
   },
   {
+    id: 'font-installed-family',
+    title: 'Figma 에 설치된 폰트는 CSS font-family 이름 그대로 쓰고 굵기를 맞춘다',
+    width: 375,
+    html: '<div><p style="font-family:Roboto;font-weight:500">roboto</p></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'roboto')?.fontName, { family: 'Roboto', style: 'Medium' }, 'font'),
+  },
+  {
+    id: 'font-family-fallback-list',
+    title: 'font-family 목록의 앞쪽 폰트가 없으면 다음 폰트를 쓴다',
+    width: 375,
+    html: '<div><p style="font-family:\'Unknown Brand\', \'Open Sans\', sans-serif;font-weight:600">fallback</p></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'fallback')?.fontName, { family: 'Open Sans', style: 'SemiBold' }, 'font'),
+  },
+  {
+    id: 'font-korean-system',
+    title: '시스템 폰트로 지정된 한글은 한글 글꼴, 영문은 Inter 로 들어간다',
+    width: 375,
+    html: '<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif"><p>한글 텍스트</p><p>Latin text</p></div>',
+    check: ({ root }, t) => {
+      t.eq(findText(root, '한글 텍스트')?.fontName?.family, 'Noto Sans KR', 'korean');
+      t.eq(findText(root, 'Latin text')?.fontName?.family, 'Inter', 'latin');
+    },
+  },
+  {
+    id: 'font-weight-italic-combo',
+    title: '굵기와 이탤릭이 함께 있으면 같은 조합의 스타일을 고른다 (600 이탤릭 → Semi Bold Italic)',
+    width: 375,
+    html: '<div><p style="font-weight:600;font-style:italic">combo</p><p style="font-family:\'Noto Sans KR\';font-weight:600">붙임</p></div>',
+    check: ({ root }, t) => {
+      t.eq(findText(root, 'combo')?.fontName?.style, 'Semi Bold Italic', 'inter semibold italic');
+      t.eq(findText(root, '붙임')?.fontName?.style, 'SemiBold', 'compact style name');
+    },
+  },
+  {
     id: 'font-italic-400',
     title: '굵기 400 이탤릭은 Italic 스타일로 들어간다',
     width: 375,

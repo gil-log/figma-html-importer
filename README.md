@@ -42,11 +42,15 @@ text nodes, and vectors.
 
 ### Typography
 
-- **28+ font families mapped** including Inter, Roboto, Poppins, Pretendard, Noto Sans KR, and all
-  common system fonts.
-- **Korean font fallback chain** — Pretendard > Noto Sans KR > Inter, so Korean text always renders.
-- **Font weight 100–900** — mapped to the correct Figma style name with `SemiBold` / `Semi Bold`
-  variant handling to avoid silent fallback to Regular.
+- **Installed fonts first** — each `font-family` in the CSS stack is looked up in the fonts your
+  Figma can use (`listAvailableFonts`), in order, so brand fonts you have installed are used as-is.
+  System fonts and generic families (`-apple-system`, `Segoe UI`, `sans-serif`, …) fall back to Inter,
+  Roboto Mono, and friends.
+- **Korean text** — Korean text set in a system font uses Pretendard, or Noto Sans KR when Pretendard
+  is not installed.
+- **Font weight 100–900 and italic** — matched against the style names the font actually has
+  (`SemiBold` / `Semi Bold` / `600`, `Italic` vs `Regular Italic`), picking the closest weight the way
+  CSS font matching does.
 - **Italic, line-height, letter-spacing, text-align, and text-transform** all preserved
   (`uppercase` / `lowercase` / `capitalize` become Figma text case).
 - **Styled inline runs** — inline `<strong>`, `<em>`, `<a>`, `<span>`, … inside a paragraph become
@@ -113,7 +117,7 @@ text nodes, and vectors.
 
 - External images are shown as placeholder rectangles (Figma plugin sandbox cannot fetch
   cross-origin images).
-- Fonts not installed in your Figma account fall back through the chain above.
+- Fonts that are not available in your Figma fall back as described above.
 - `position: fixed` elements are placed relative to the whole page, so a fixed bottom bar ends up at
   the bottom of the imported frame.
 - CSS animations, transitions, and interactive states are not captured.

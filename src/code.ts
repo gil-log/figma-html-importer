@@ -82,7 +82,7 @@ function toSolidPaint(css: string): SolidPaint | null {
 
 // ─── 폰트 유틸리티 ────────────────────────────────────────────
 
-// CSS 폰트 패밀리 → Figma에서 사용 가능한 폰트 이름으로 매핑
+// CSS 폰트 패밀리 별칭 — Figma 에 같은 이름의 폰트가 없을 때 대신 쓸 폰트 (시스템 폰트·generic family)
 const FONT_MAP: Record<string, string> = {
   'inter': 'Inter',
   'roboto': 'Roboto',
@@ -127,83 +127,125 @@ const FONT_MAP: Record<string, string> = {
   'apple system': 'Inter',
 };
 
-function mapFontFamily(cssFontFamily: string): string {
-  const families = cssFontFamily.split(',').map((f) => f.trim().replace(/['"]/g, '').toLowerCase());
-  for (const fam of families) {
-    if (FONT_MAP[fam]) return FONT_MAP[fam];
+// ─── 폰트 선택 ────────────────────────────────────────────────
+//
+// 1) CSS font-family 목록을 앞에서부터 보며 Figma 에 설치된 같은 이름의 폰트를 찾는다
+// 2) 없으면 FONT_MAP 별칭(시스템 폰트 → Inter/Noto Sans KR 등) 중 설치된 것을 쓴다
+// 3) 굵기·이탤릭은 그 폰트가 실제로 가진 스타일 이름에서 가장 가까운 것을 고른다
+//    ("SemiBold"/"Semi Bold"/"600", 400 이탤릭 = "Italic" 같은 이름 차이를 흡수)
+
+type FontIndex = Map<string, { family: string; styles: string[] }>;
+let fontIndexPromise: Promise<FontIndex> | null = null;
+
+function getFontIndex(): Promise<FontIndex> {
+  if (!fontIndexPromise) {
+    fontIndexPromise = figma.listAvailableFontsAsync().then((fonts) => {
+      const index: FontIndex = new Map();
+      for (const { fontName } of fonts) {
+        const key = fontName.family.toLowerCase();
+        const entry = index.get(key) ?? { family: fontName.family, styles: [] };
+        entry.styles.push(fontName.style);
+        index.set(key, entry);
+      }
+      return index;
+    });
   }
-  return 'Inter';
+  return fontIndexPromise;
 }
 
-// CSS font-weight → Figma 스타일 접미사
-function weightToFigmaStyle(weight: string, italic: boolean): string {
-  const w = parseInt(weight) || 400;
-  let style = 'Regular';
-  if (w >= 900) style = 'Black';
-  else if (w >= 800) style = 'ExtraBold';
-  else if (w >= 700) style = 'Bold';
-  else if (w >= 600) style = 'SemiBold';
-  else if (w >= 500) style = 'Medium';
-  else if (w >= 400) style = 'Regular';
-  else if (w >= 300) style = 'Light';
-  else if (w >= 200) style = 'ExtraLight';
-  else if (w >= 100) style = 'Thin';
-  // 400 이탤릭은 Figma 폰트 대부분이 'Regular Italic' 이 아니라 'Italic' 으로 부른다
-  if (italic) return style === 'Regular' ? 'Italic' : style + ' Italic';
-  return style;
+const HANGUL = /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/;
+const KOREAN_CAPABLE = /pretendard|noto sans (kr|cjk)|nanum|apple sd gothic|malgun|spoqa|suit|gmarket|ibm plex sans kr|korean| kr$/i;
+const KOREAN_PREFERRED = ['Pretendard', 'Noto Sans KR'];
+
+/** 스타일 이름 → 굵기·이탤릭 */
+function parseStyleName(style: string): { weight: number; italic: boolean } {
+  const s = style.toLowerCase().replace(/[\s_-]/g, '');
+  const italic = /italic|oblique/.test(s);
+  const numeric = s.match(/([1-9]00)/);
+  let weight = 400;
+  if (/thin|hairline/.test(s)) weight = 100;
+  else if (/extralight|ultralight/.test(s)) weight = 200;
+  else if (/light/.test(s)) weight = 300;
+  else if (/semibold|demibold/.test(s)) weight = 600;
+  else if (/extrabold|ultrabold/.test(s)) weight = 800;
+  else if (/black|heavy/.test(s)) weight = 900;
+  else if (/bold/.test(s)) weight = 700;
+  else if (/medium/.test(s)) weight = 500;
+  else if (numeric) weight = parseInt(numeric[1], 10);
+  return { weight, italic };
 }
 
-// Figma에 없는 폰트 스타일은 가까운 것으로 폴백
-// 한국어 폰트는 Noto Sans KR을 중간 폴백으로 시도
-const KOREAN_FAMILIES = new Set([
-  'Pretendard', 'Noto Sans KR', 'Apple SD Gothic Neo',
-  'Malgun Gothic', 'NanumGothic',
-]);
-
-async function loadBestFont(family: string, style: string): Promise<FontName> {
-  const candidates: FontName[] = [
-    { family, style },
-  ];
-
-  // Figma 폰트 스타일 네이밍은 'SemiBold' / 'Semi Bold' 두 가지 관례가 혼재
-  // → 두 변형 모두 시도하여 폰트 로딩 실패 방지
-  const spaced = style
-    .replace('SemiBold', 'Semi Bold')
-    .replace('ExtraBold', 'Extra Bold')
-    .replace('ExtraLight', 'Extra Light');
-  if (spaced !== style) candidates.push({ family, style: spaced });
-  const compact = style
-    .replace('Semi Bold', 'SemiBold')
-    .replace('Extra Bold', 'ExtraBold')
-    .replace('Extra Light', 'ExtraLight');
-  if (compact !== style) candidates.push({ family, style: compact });
-  if (style === 'Italic') candidates.push({ family, style: 'Regular Italic' });
-
-  candidates.push(
-    { family, style: style === 'Italic' ? 'Regular' : style.replace(' Italic', '') },
-    { family, style: 'Regular' },
-  );
-
-  // 한국어 폰트 → Noto Sans KR 폴백 (Inter보다 한글 표시가 나음)
-  if (family !== 'Noto Sans KR' && KOREAN_FAMILIES.has(family)) {
-    candidates.push(
-      { family: 'Noto Sans KR', style },
-      { family: 'Noto Sans KR', style: style.replace(' Italic', '') },
-      { family: 'Noto Sans KR', style: 'Regular' },
-    );
-  }
-
-  candidates.push({ family: 'Inter', style: 'Regular' });
-
-  for (const fn of candidates) {
-    try {
-      await figma.loadFontAsync(fn);
-      return fn;
-    } catch {
-      // 다음 후보 시도
+/** CSS 폰트 매칭처럼 굵기가 가장 가까운 스타일 (같은 거리면 목표가 500 이상이면 더 굵은 쪽) */
+function pickStyle(styles: string[], weight: number, italic: boolean): string {
+  let best = styles[0];
+  let bestScore = Infinity;
+  for (const style of styles) {
+    const p = parseStyleName(style);
+    const tie = weight >= 500 ? (p.weight >= weight ? 0 : 0.5) : (p.weight <= weight ? 0 : 0.5);
+    const score = (p.italic === italic ? 0 : 1000) + Math.abs(p.weight - weight) + tie;
+    if (score < bestScore) {
+      best = style;
+      bestScore = score;
     }
   }
-  throw new Error('Cannot load any font');
+  return best;
+}
+
+function resolveFamily(cssFontFamily: string, text: string, index: FontIndex): string {
+  const families = cssFontFamily.split(',').map((f) => f.trim().replace(/['"]/g, '').toLowerCase()).filter(Boolean);
+  let resolved: string | null = null;
+  let explicit = false;
+  for (const fam of families) {
+    const installed = index.get(fam);
+    if (installed) {
+      resolved = installed.family;
+      explicit = true;
+      break;
+    }
+    const alias = FONT_MAP[fam];
+    if (alias && index.has(alias.toLowerCase())) {
+      resolved = index.get(alias.toLowerCase())!.family;
+      break;
+    }
+  }
+  // 시스템 폰트 별칭으로 온 한글 텍스트는 한글 글꼴로 (브라우저도 한글 글리프는 한글 시스템 폰트로 그린다)
+  if (HANGUL.test(text) && (!resolved || (!explicit && !KOREAN_CAPABLE.test(resolved)))) {
+    const korean = KOREAN_PREFERRED.find((f) => index.has(f.toLowerCase()));
+    if (korean) return korean;
+  }
+  return resolved ?? 'Inter';
+}
+
+const fontCache = new Map<string, Promise<FontName>>();
+
+/** CSS font-family·font-weight·font-style → 로드된 Figma FontName */
+function resolveFont(cssFontFamily: string, cssWeight: string, cssFontStyle: string, text: string): Promise<FontName> {
+  const weight = parseInt(cssWeight, 10) || 400;
+  const italic = cssFontStyle === 'italic' || cssFontStyle.startsWith('oblique');
+  const key = `${cssFontFamily}|${weight}|${italic}|${HANGUL.test(text)}`;
+  let cached = fontCache.get(key);
+  if (!cached) {
+    cached = (async () => {
+      const index = await getFontIndex();
+      const family = resolveFamily(cssFontFamily, text, index);
+      const entry = index.get(family.toLowerCase());
+      const candidates: FontName[] = [];
+      if (entry) candidates.push({ family: entry.family, style: pickStyle(entry.styles, weight, italic) });
+      candidates.push({ family: 'Inter', style: pickStyle(index.get('inter')?.styles ?? ['Regular'], weight, italic) });
+      candidates.push({ family: 'Inter', style: 'Regular' });
+      for (const fn of candidates) {
+        try {
+          await figma.loadFontAsync(fn);
+          return fn;
+        } catch {
+          // 다음 후보 시도
+        }
+      }
+      throw new Error('Cannot load any font');
+    })();
+    fontCache.set(key, cached);
+  }
+  return cached;
 }
 
 // ─── Box Shadow 파싱 ───────────────────────────────────────────
@@ -540,8 +582,6 @@ function applyFrameStyle(frame: FrameNode, s: DomStyleData, w: number, h: number
 
 // ─── 텍스트 노드 ──────────────────────────────────────────────
 
-const isItalic = (fontStyle: string | undefined) => fontStyle === 'italic' || !!fontStyle?.startsWith('oblique');
-
 function toTextAlign(textAlign: string, direction: string): 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED' {
   const rtl = direction === 'rtl';
   switch (textAlign) {
@@ -597,9 +637,8 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
     offset = end;
     if (end <= start || end > t.characters.length) continue;
     if (seg.fontFamily || seg.fontWeight || seg.fontStyle) {
-      const family = mapFontFamily(seg.fontFamily ?? style.fontFamily);
-      const figmaStyle = weightToFigmaStyle(seg.fontWeight ?? style.fontWeight, isItalic(seg.fontStyle ?? style.fontStyle));
-      const font = await loadBestFont(family, figmaStyle);
+      const font = await resolveFont(seg.fontFamily ?? style.fontFamily, seg.fontWeight ?? style.fontWeight,
+        seg.fontStyle ?? style.fontStyle, seg.text);
       if (font.family !== baseFont.family || font.style !== baseFont.style) t.setRangeFontName(start, end, font);
     }
     if (seg.fontSize) t.setRangeFontSize(start, end, Math.max(seg.fontSize, 1));
@@ -626,8 +665,7 @@ async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
  */
 async function createTextNode(node: DomNodeData, ox: number, oy: number): Promise<TextNode> {
   const { style, rect } = node;
-  const family = mapFontFamily(style.fontFamily);
-  const fontName = await loadBestFont(family, weightToFigmaStyle(style.fontWeight, isItalic(style.fontStyle)));
+  const fontName = await resolveFont(style.fontFamily, style.fontWeight, style.fontStyle, node.text ?? '');
 
   const t = figma.createText();
   t.fontName = fontName;
