@@ -63,8 +63,13 @@ text nodes, and vectors.
 
 - **SVG vector import** — `<svg>` elements are passed to `createNodeFromSvg` for native Figma
   vectors.
-- **`<use>` inlining** — symbol references are resolved, viewBox scaling is applied, and
-  `currentColor` is replaced with the actual computed color.
+- **CSS-styled icons** — `fill`, `stroke`, `stroke-width`, opacity, and friends set from CSS
+  (classes, `<style>`, Tailwind `fill-*`/`stroke-*`, inherited `color` for `currentColor`) are
+  written onto the SVG so Figma draws the same colors. SVGs without a `viewBox` keep their
+  coordinate system when resized with CSS.
+- **`<use>` inlining** — sprite references are resolved (symbol `viewBox`, `x`/`y` offsets, and
+  references to plain elements), and gradients or clip paths defined in another SVG's `<defs>` are
+  copied in.
 - **Image placeholders** — `<img>` tags become light-gray rounded rectangles preserving the original
   dimensions.
 

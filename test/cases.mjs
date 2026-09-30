@@ -685,4 +685,15 @@ export const cases = [
     html: '<div><svg width="20" height="20" style="width:40px;height:40px"><rect width="20" height="20" fill="blue"/></svg></div>',
     check: ({ root }, t) => t.ok(find(root, (n) => (n.svg || '').includes('viewBox="0 0 20 20"')), 'viewBox added'),
   },
+  {
+    id: 'svg-sprite-defs',
+    title: '아이콘 스프라이트(<use>+symbol)와 다른 SVG 에 정의된 그라디언트가 들어간다',
+    width: 375,
+    html: '<svg style="display:none"><defs><linearGradient id="g1"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><symbol id="ic" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol></svg><div><svg width="20" height="20"><use href="#ic" width="20" height="20"/></svg><svg width="20" height="20"><rect width="20" height="20" fill="url(#g1)"/></svg></div>',
+    check: ({ root }, t) => {
+      const svgs = all(root, (n) => !!n.svg).map((n) => n.svg);
+      t.ok(svgs.some((v) => /<g transform="scale\(2,2\)"><rect/.test(v)), `symbol inlined: ${svgs[0]}`);
+      t.ok(svgs.some((v) => v.includes('<linearGradient id="g1"') && v.includes('url(#g1)')), 'external gradient copied');
+    },
+  },
 ];

@@ -787,16 +787,71 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   return node;
 }
 
+// ─── SVG ──────────────────────────────────────────────────────
+
+// Figma SVG 파서는 CSS(class·<style>·상속된 color)를 모르므로, 계산된 표현 속성을 속성으로 옮긴다
+const SVG_PAINT_PROPS: [cssProp: string, attr: string, initial: string][] = [
+  ['fill', 'fill', 'rgb(0, 0, 0)'],
+  ['fillOpacity', 'fill-opacity', '1'],
+  ['fillRule', 'fill-rule', 'nonzero'],
+  ['stroke', 'stroke', 'none'],
+  ['strokeWidth', 'stroke-width', '1'],
+  ['strokeOpacity', 'stroke-opacity', '1'],
+  ['strokeLinecap', 'stroke-linecap', 'butt'],
+  ['strokeLinejoin', 'stroke-linejoin', 'miter'],
+  ['strokeDasharray', 'stroke-dasharray', 'none'],
+  ['strokeMiterlimit', 'stroke-miterlimit', '4'],
+  ['opacity', 'opacity', '1'],
+];
+
+function svgValue(cssProp: string, v: string): string {
+  // stroke-width 는 단위 없는 숫자로 (Figma 는 "2px" 를 해석하지 못할 수 있다)
+  if (cssProp === 'strokeWidth' || cssProp === 'strokeMiterlimit') return String(pf(v));
+  return v;
+}
+
+/**
+ * 원본 SVG 트리와 복제본을 같이 순회하며 계산된 fill·stroke 등을 속성으로 옮긴다.
+ * 부모에서 그대로 상속된 값은 쓰지 않고, 달라지는 지점에만 적는다 (url(#…) 페인트는 원래 속성 유지).
+ */
+function inlineSvgStyles(orig: Element, clone: Element, win: Window, parentValues: Record<string, string> | null): void {
+  const cs = win.getComputedStyle(orig);
+  if (cs.display === 'none') {
+    clone.remove();
+    return;
+  }
+  const values: Record<string, string> = {};
+  for (const [prop, attr, initial] of SVG_PAINT_PROPS) {
+    const v = svgValue(prop, (cs as any)[prop] as string);
+    values[prop] = v;
+    if (!v || v.startsWith('url(')) continue;
+    const inherited = parentValues ? parentValues[prop] : svgValue(prop, initial);
+    // opacity 는 상속되지 않으므로 기본값과만 비교한다
+    const base = prop === 'opacity' ? '1' : inherited;
+    if (v !== base || (clone.hasAttribute(attr) && clone.getAttribute(attr) !== v)) clone.setAttribute(attr, v);
+  }
+  const origKids = Array.from(orig.children);
+  const cloneKids = Array.from(clone.children);
+  for (let i = 0; i < origKids.length && i < cloneKids.length; i++) {
+    inlineSvgStyles(origKids[i], cloneKids[i], win, values);
+  }
+}
+
 /**
  * SVG 요소를 Figma createNodeFromSvg에 넘길 수 있는 완전한 SVG 문자열로 변환.
  *
  * 처리 내용:
- * 1. <use href="#id"> → 해당 <symbol>/<defs> 내용으로 인라인 치환
- * 2. currentColor → 실제 computed color 값으로 치환
- * 3. 명시적 width/height/viewBox 보장
+ * 1. CSS 로 지정된 fill·stroke 등 → 속성 (currentColor 도 이 과정에서 실제 색이 된다)
+ * 2. <use href="#id"> → 참조 대상으로 인라인 치환 (x/y, symbol viewBox 반영)
+ * 3. SVG 밖 <defs> 의 그라디언트·클립 등 url(#id) 참조 대상 복사
+ * 4. viewBox 보장 + width/height 를 실제 렌더 픽셀값으로
  */
 function serializeSvg(svgEl: SVGElement, cs: CSSStyleDeclaration): string {
+  const doc = svgEl.ownerDocument;
+  const win = winOf(svgEl);
+  const NS = 'http://www.w3.org/2000/svg';
   const clone = svgEl.cloneNode(true) as SVGElement;
+  inlineSvgStyles(svgEl, clone, win, null);
 
   // <use> 참조 인라인 처리
   const useEls = Array.from(clone.querySelectorAll('use'));
@@ -806,34 +861,75 @@ function serializeSvg(svgEl: SVGElement, cs: CSSStyleDeclaration): string {
       useEl.getAttribute('xlink:href') ||
       '';
     if (!href.startsWith('#')) continue;
-    const symbolEl = svgEl.ownerDocument.getElementById(href.slice(1));
-    if (!symbolEl) continue;
+    const target = doc.getElementById(href.slice(1));
+    if (!target) continue;
 
-    const g = svgEl.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');
-    // symbol의 viewBox를 transform으로 반영
-    const vb = symbolEl.getAttribute('viewBox');
-    if (vb) {
-      const [, , vw, vh] = vb.split(/\s+/).map(Number);
-      const uw = parseFloat(useEl.getAttribute('width') || '0') || vw;
-      const uh = parseFloat(useEl.getAttribute('height') || '0') || vh;
-      if (vw && vh && uw && uh) {
-        const sx = uw / vw, sy = uh / vh;
-        g.setAttribute('transform', `scale(${sx},${sy})`);
+    const g = doc.createElementNS(NS, 'g');
+    const transforms: string[] = [];
+    const ux = parseFloat(useEl.getAttribute('x') || '0');
+    const uy = parseFloat(useEl.getAttribute('y') || '0');
+    if (ux || uy) transforms.push(`translate(${ux},${uy})`);
+    if (target.tagName.toLowerCase() === 'symbol') {
+      // symbol 의 viewBox → use 크기에 맞춘 scale + 원점 이동
+      const vb = target.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+      if (vb && vb.length === 4 && vb[2] && vb[3]) {
+        const uw = parseFloat(useEl.getAttribute('width') || '0') || vb[2];
+        const uh = parseFloat(useEl.getAttribute('height') || '0') || vb[3];
+        transforms.push(`scale(${uw / vb[2]},${uh / vb[3]})`);
+        if (vb[0] || vb[1]) transforms.push(`translate(${-vb[0]},${-vb[1]})`);
       }
+      g.innerHTML = target.innerHTML;
+    } else {
+      const copy = target.cloneNode(true) as Element;
+      copy.removeAttribute('id');
+      g.appendChild(copy);
     }
-    g.innerHTML = symbolEl.innerHTML;
+    if (transforms.length) g.setAttribute('transform', transforms.join(' '));
+    for (const attr of ['fill', 'stroke', 'stroke-width', 'opacity', 'class', 'style']) {
+      const v = useEl.getAttribute(attr);
+      if (v !== null) g.setAttribute(attr, v);
+    }
     useEl.parentNode?.replaceChild(g, useEl);
   }
 
-  // currentColor → 실제 색상 치환
+  // SVG 밖 <defs> 에 정의된 url(#id) 참조 대상을 복사 (아이콘 스프라이트의 그라디언트 등)
+  const missing = new Set<string>();
+  const refPattern = /url\(\s*["']?#([^"')\s]+)["']?\s*\)/g;
+  for (const el of [clone, ...Array.from(clone.querySelectorAll('*'))]) {
+    for (const attr of Array.from(el.attributes)) {
+      for (const m of attr.value.matchAll(refPattern)) {
+        if (!clone.querySelector(`[id="${CSS.escape(m[1])}"]`)) missing.add(m[1]);
+      }
+    }
+  }
+  if (missing.size > 0) {
+    const defs = doc.createElementNS(NS, 'defs');
+    for (const id of missing) {
+      const def = doc.getElementById(id);
+      if (def) defs.appendChild(def.cloneNode(true));
+    }
+    if (defs.childNodes.length) clone.insertBefore(defs, clone.firstChild);
+  }
+
+  // viewBox 가 없으면 원래 좌표계(width/height 속성, 없으면 렌더 크기)를 viewBox 로 고정해
+  // CSS 로 크기를 바꿔도 내용이 같이 커지게 한다
+  const domR = svgEl.getBoundingClientRect();
+  const pw = round2(domR.width) || 24;
+  const ph = round2(domR.height) || 24;
+  if (!clone.hasAttribute('viewBox')) {
+    const attrLen = (name: string, fallback: number) => {
+      const v = clone.getAttribute(name);
+      return v && /^[\d.]+(px)?$/.test(v.trim()) ? parseFloat(v) : fallback;
+    };
+    clone.setAttribute('viewBox', `0 0 ${attrLen('width', pw)} ${attrLen('height', ph)}`);
+  }
+
+  // currentColor → 실제 색상 치환 (<use> 로 가져온 symbol 내용 등 계산 스타일이 없는 부분)
   const computedColor = cs.color || 'black';
   let svgHtml = clone.outerHTML.replace(/currentColor/gi, computedColor);
 
   // width/height를 항상 DOM 실제 픽셀값으로 교체
   // (width="100%", width="1em" 등 상대값이면 Figma가 잘못 해석)
-  const domR = svgEl.getBoundingClientRect();
-  const pw = round2(domR.width) || 24;
-  const ph = round2(domR.height) || 24;
   svgHtml = svgHtml.replace(/^<svg([^>]*)>/i, (_, attrs: string) => {
     const cleanAttrs = attrs
       .replace(/\s+width\s*=\s*["'][^"']*["']/gi, '')
