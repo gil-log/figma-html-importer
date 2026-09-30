@@ -58,6 +58,7 @@ export interface DomStyleData {
   paddingBottom: number;
   paddingLeft: number;
   position: string;
+  zIndex: string;
 }
 
 /**

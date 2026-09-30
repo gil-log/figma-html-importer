@@ -408,6 +408,7 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     paddingBottom: pf(cs.paddingBottom),
     paddingLeft: pf(cs.paddingLeft),
     position: cs.position,
+    zIndex: cs.zIndex,
   };
 }
 
@@ -716,6 +717,9 @@ function plainTextStyle(cs: CSSStyleDeclaration): DomStyleData {
     filter: 'none',
     backdropFilter: 'none',
     mixBlendMode: 'normal',
+    // 글자는 부모의 일반 흐름 콘텐츠로 그려진다 (부모의 position/z-index 를 물려받지 않는다)
+    position: 'static',
+    zIndex: 'auto',
     paddingTop: 0,
     paddingRight: 0,
     paddingBottom: 0,
@@ -950,6 +954,26 @@ function extractRotation(el: Element, cs: CSSStyleDeclaration): DomNodeData['tra
 }
 
 /**
+ * 형제 레이어를 CSS 그리기 순서로 정렬 (뒤에 올수록 위에 그려진다).
+ * 음수 z-index → 일반 흐름 요소·글자 → z-index auto/0 인 positioned 요소 → 양수 z-index, 같은 층은 DOM 순서.
+ * flex·grid 자식은 position 이 없어도 z-index 가 적용된다.
+ */
+function sortByPaintOrder(children: DomNodeData[], parentDisplay: string): DomNodeData[] {
+  const flexOrGrid = /flex|grid/.test(parentDisplay);
+  const layerOf = (c: DomNodeData): [number, number] => {
+    const z = parseInt(c.style.zIndex, 10);
+    const positioned = c.style.position !== 'static';
+    if (!positioned && !(flexOrGrid && !isNaN(z))) return [1, 0];
+    if (isNaN(z) || z === 0) return positioned ? [2, 0] : [1, 0];
+    return z < 0 ? [0, z] : [3, z];
+  };
+  return children
+    .map((c, i) => ({ c, i, k: layerOf(c) }))
+    .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i)
+    .map((x) => x.c);
+}
+
+/**
  * @param el 직렬화할 DOM 요소 (position:fixed 는 render.ts prepareForCapture 에서 absolute 로 바뀐 상태)
  * @param parentRect 부모의 getBoundingClientRect (상대 좌표 계산용)
  */
@@ -1047,6 +1071,8 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
     const pseudoAfter = extractPseudoElement(el, '::after');
     if (pseudoAfter) node.children.push(pseudoAfter);
   }
+
+  node.children = sortByPaintOrder(node.children, cs.display);
 
   if (collapsed) {
     if (node.children.length === 0 && !node.text) return null;

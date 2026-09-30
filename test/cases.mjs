@@ -651,6 +651,16 @@ export const cases = [
     },
   },
   {
+    id: 'z-index-order',
+    title: '형제 레이어가 CSS 그리기 순서(음수 z → 일반 흐름 → positioned → 양수 z)로 쌓인다',
+    width: 375,
+    html: '<div style="position:relative;width:100px;height:100px"><div style="position:absolute;inset:0;background:red"></div><div style="background:blue;height:50px"></div><div style="position:absolute;top:0;left:0;width:10px;height:10px;background:lime;z-index:-1"></div><div style="position:relative;z-index:5;background:yellow;height:20px"></div></div>',
+    check: ({ root }, t) => {
+      const order = root.children.map((c) => JSON.stringify(solid(c)));
+      t.eq(order, ['[0,255,0]', '[0,0,255]', '[255,0,0]', '[255,255,0]'].map(String), 'bottom → top');
+    },
+  },
+  {
     id: 'zero-size-wrapper',
     title: '크기가 0 인 래퍼 안의 요소도 들어간다',
     width: 375,

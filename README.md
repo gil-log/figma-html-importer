@@ -102,6 +102,9 @@ text nodes, and vectors.
   with styled ranges and line breaks. Inline pieces that draw their own box — badges with a
   background, icons, `inline-block` or `display: block` children — stay separate layers at their
   measured positions. Children hidden with `display: none` are left out.
+- **Stacking order** — sibling layers are ordered the way CSS paints them: negative `z-index`, then
+  in-flow content, then positioned elements, then positive `z-index` (flex and grid items honor
+  `z-index` without `position`), so overlays declared first still land on top.
 - **Rotation** — elements rotated with `transform` or the `rotate` property (rotated chevrons,
   tilted badges) keep their real size and are rotated in Figma around the same `transform-origin`.
 - **Zero-size wrappers and `display: contents`** — children of zero-size absolutely positioned
