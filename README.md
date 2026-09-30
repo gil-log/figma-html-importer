@@ -125,8 +125,8 @@ text nodes, and vectors.
   keep two decimal places, so 0.5px hairlines survive.
 - **Form controls** — input and textarea values or placeholders (with the `::placeholder` color),
   the selected `<option>` label with its dropdown arrow, and masked passwords. Native checkboxes,
-  radios, range sliders, and color inputs are drawn as vectors, including the checked state and
-  `accent-color`.
+  radios, range sliders, color inputs, `<progress>`, and `<meter>` are drawn as vectors, including
+  the checked state, the current value, and `accent-color`.
 - **CSS color normalization** — oklch, `color(srgb ...)`, space-separated `rgb()`, and any other
   format are converted to legacy `rgb()` via a Canvas 2D round-trip.
 

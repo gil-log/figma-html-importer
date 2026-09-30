@@ -850,6 +850,31 @@ function nativeControlSvg(type: string, el: HTMLInputElement, cs: CSSStyleDeclar
   return null;
 }
 
+/**
+ * 기본 모양 <progress>·<meter> → 값만큼 채운 막대 SVG.
+ * progress 는 accent-color, meter 는 low/high 범위 밖이면 노랑, 안이면 초록 (Chrome 기본 모양).
+ * 값이 없는 progress(진행 중 표시)는 빈 트랙만 그린다.
+ */
+function meterSvg(el: Element, cs: CSSStyleDeclaration, w: number, h: number): string {
+  const tag = el.tagName.toLowerCase();
+  let ratio = 0;
+  let color = accentOf(cs);
+  if (tag === 'progress') {
+    const p = el as HTMLProgressElement;
+    ratio = p.hasAttribute('value') && p.max > 0 ? Math.min(1, Math.max(0, p.value / p.max)) : 0;
+  } else {
+    const m = el as HTMLMeterElement;
+    ratio = m.max > m.min ? Math.min(1, Math.max(0, (m.value - m.min) / (m.max - m.min))) : 0;
+    const outOfRange = (el.hasAttribute('low') && m.value < m.low) || (el.hasAttribute('high') && m.value > m.high);
+    color = outOfRange ? 'rgb(255, 185, 0)' : 'rgb(16, 124, 16)';
+  }
+  const r = round2(Math.min(h / 2, 4));
+  return `<svg ${SVG_NS_ATTR} width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="${r}" fill="#efefef" stroke="#b2b2b2" stroke-width="0.5"/>` +
+    (ratio > 0 ? `<rect x="0.5" y="0.5" width="${round2((w - 1) * ratio)}" height="${h - 1}" rx="${r}" fill="${color}"/>` : '') +
+    '</svg>';
+}
+
 const DEFAULT_BUTTON_LABEL: Record<string, string> = { submit: 'Submit', reset: 'Reset' };
 
 /**
@@ -1072,7 +1097,9 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
     };
 
   // 크기 0 인 그림·폼 요소는 보이는 것이 없다
-  if (collapsed && (tag === 'svg' || MEDIA_TAGS.has(tag) || FORM_TAGS.has(tag))) return null;
+  if (collapsed && (tag === 'svg' || MEDIA_TAGS.has(tag) || FORM_TAGS.has(tag) || tag === 'progress' || tag === 'meter')) {
+    return null;
+  }
 
   // SVG: outerHTML을 직렬화하여 Figma에서 createNodeFromSvg로 재현
   if (tag === 'svg') {
@@ -1095,6 +1122,10 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   applyRadii(node.style, cs, rect.width, rect.height);
 
   if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);
+  if (tag === 'progress' || tag === 'meter') {
+    const native = ((cs as any).appearance || (cs as any).webkitAppearance || 'auto') !== 'none';
+    return native ? { ...node, tagName: 'svg', svgHtml: meterSvg(el, cs, round2(rect.width), round2(rect.height)) } : node;
+  }
   if (MEDIA_TAGS.has(tag)) {
     node.imageUrl = mediaImageUrl(el, tag);
     return node;

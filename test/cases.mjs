@@ -1254,4 +1254,15 @@ export const cases = [
       t.eq(cells.map((c) => c.strokeAlign), ['CENTER', 'CENTER'], 'center aligned');
     },
   },
+  {
+    id: 'progress-element',
+    title: '<progress>·<meter> 는 값만큼 채워진 막대로 들어간다 (meter 는 범위 밖이면 노랑)',
+    width: 375,
+    html: '<div><progress value="70" max="100" style="width:100px"></progress><meter value="0.2" low="0.3" style="width:100px"></meter></div>',
+    check: ({ root }, t) => {
+      const svgs = all(root, (n) => !!n.svg).map((n) => n.svg);
+      t.ok(svgs.some((v) => /<rect[^>]*width="69\.3"/.test(v)), `progress filled 70%: ${svgs[0]}`);
+      t.ok(svgs.some((v) => v.includes('rgb(255, 185, 0)')), 'meter below low is yellow');
+    },
+  },
 ];
