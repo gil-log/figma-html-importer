@@ -310,7 +310,10 @@ function extractPseudoElement(
   }
 }
 
-const MARKER_GLYPHS: Record<string, string> = { disc: '•', circle: '◦', square: '▪' };
+// disclosure-* 는 <summary> 의 펼침 삼각형
+const MARKER_GLYPHS: Record<string, string> = {
+  disc: '•', circle: '◦', square: '▪', 'disclosure-open': '▾', 'disclosure-closed': '▸',
+};
 
 function toRoman(n: number): string {
   const table: [number, string][] = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'],
@@ -568,6 +571,13 @@ type Run = { kind: 'text'; nodes: Node[] } | { kind: 'element'; el: Element };
 function collectRuns(el: Element, win: Window): Run[] {
   const runs: Run[] = [];
   let cur: Node[] = [];
+  // 안쪽이 그려지지 않는 요소: content-visibility:hidden, 닫힌 <details> 의 <summary> 밖 내용
+  // (Chrome 은 이 안의 요소에도 레이아웃 값을 돌려주므로 직접 걸러야 한다)
+  if (win.getComputedStyle(el).contentVisibility === 'hidden') return runs;
+  if (el.tagName.toLowerCase() === 'details' && !el.hasAttribute('open')) {
+    const summary = Array.from(el.children).find((c) => c.tagName.toLowerCase() === 'summary');
+    return summary ? [{ kind: 'element', el: summary }] : runs;
+  }
   const flush = () => {
     if (cur.some((n) => (n.textContent ?? '').trim().length > 0)) runs.push({ kind: 'text', nodes: cur });
     cur = [];

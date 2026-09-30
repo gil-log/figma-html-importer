@@ -1418,4 +1418,17 @@ export const cases = [
       t.ok(roots.every((r) => imageFill(find(r, (n) => n.type === 'RECTANGLE'))), 'image in every width');
     },
   },
+  {
+    id: 'details-summary',
+    title: '<summary> 앞에는 펼침 삼각형(▾/▸)이 붙고, 닫힌 <details> 의 내용은 들어가지 않는다',
+    width: 375,
+    html: '<div style="width:300px"><details open><summary>Open one</summary><p>shown answer</p></details><details><summary>Closed one</summary><p>hidden answer</p></details></div>',
+    check: ({ root }, t) => {
+      t.ok(findText(root, '▾'), 'open marker');
+      t.ok(findText(root, '▸'), 'closed marker');
+      t.ok(!findText(root, '1.'), 'no decimal marker');
+      t.ok(findText(root, 'shown answer'), 'open content');
+      t.ok(!findText(root, 'hidden answer'), 'closed content hidden');
+    },
+  },
 ];
