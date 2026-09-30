@@ -11,17 +11,19 @@
 import type { DomNodeData, DomStyleData, TextSegment } from './types';
 
 const SKIP_TAGS = new Set([
-  'script', 'style', 'meta', 'link', 'head', 'noscript',
-  'br', 'template', 'canvas', 'video', 'audio',
+  'script', 'style', 'meta', 'link', 'head', 'noscript', 'title', 'base',
+  'template', 'canvas', 'video', 'audio',
   // hr은 제거 — 구분선으로 직접 렌더링
+  // br 은 텍스트 흐름 안에서 줄바꿈으로 처리
 ]);
 
-// 인라인 텍스트 레벨 태그: 자식이 모두 이 태그면 textContent로 병합
-const INLINE_TEXT_TAGS = new Set([
-  'strong', 'em', 'b', 'i', 'a', 'span', 'small', 'mark',
-  'sub', 'sup', 'abbr', 'cite', 'code', 'kbd', 'label',
-  'time', 'u', 's', 'del', 'ins',
+// 글자 흐름 안에 있어도 텍스트로 합칠 수 없는 요소 (자체 박스·그림을 가진다)
+const REPLACED_TAGS = new Set([
+  'svg', 'img', 'canvas', 'video', 'audio', 'iframe', 'input', 'select', 'textarea', 'button',
+  'object', 'embed', 'picture', 'math', 'hr', 'progress', 'meter',
 ]);
+
+const FORM_TAGS = new Set(['input', 'textarea', 'select']);
 
 /** 요소가 속한 문서(렌더 iframe)의 window */
 function winOf(el: Element): Window {
@@ -144,7 +146,7 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
       if (bgClip === 'text') return '';
       return cs.backgroundImage || '';
     })(),
-    color: normalizeCssColor(cs.color),
+    color: textColor(cs),
     fontSize: pf(cs.fontSize) || 14,
     fontWeight: cs.fontWeight,
     fontFamily: cs.fontFamily,
@@ -152,7 +154,9 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     lineHeight: cs.lineHeight,
     textAlign: cs.textAlign,
     letterSpacing: cs.letterSpacing,
-    textDecoration: cs.textDecoration,
+    textDecoration: cs.textDecorationLine || cs.textDecoration,
+    textTransform: cs.textTransform,
+    direction: cs.direction,
     borderTopLeftRadius: pf(cs.borderTopLeftRadius),
     borderTopRightRadius: pf(cs.borderTopRightRadius),
     borderBottomRightRadius: pf(cs.borderBottomRightRadius),
@@ -181,6 +185,376 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
   };
 }
 
+/** 텍스트 색: -webkit-text-fill-color 가 따로 지정돼 있으면 그 색이 실제로 칠해진다 */
+function textColor(cs: CSSStyleDeclaration): string {
+  const fill = (cs as any).webkitTextFillColor as string | undefined;
+  if (fill && !isClearColor(fill)) return normalizeCssColor(fill);
+  return normalizeCssColor(cs.color);
+}
+
+/** 완전 투명 색인가 (normalizeCssColor 는 legacy rgba() 를 그대로 돌려주므로 alpha 0 도 확인) */
+function isClearColor(css: string): boolean {
+  const c = normalizeCssColor(css);
+  return !c || c === 'transparent' || /^rgba\([^)]*,\s*0(\.0+)?\s*\)$/.test(c);
+}
+
+/** 배경·테두리·그림자처럼 자체 박스를 그리는 스타일이 있는가 */
+function hasBoxDecoration(cs: CSSStyleDeclaration): boolean {
+  if (!isClearColor(cs.backgroundColor)) return true;
+  const bgClip = (cs as any).webkitBackgroundClip || cs.backgroundClip;
+  if (cs.backgroundImage && cs.backgroundImage !== 'none' && bgClip !== 'text') return true;
+  const sides = ['Top', 'Right', 'Bottom', 'Left'] as const;
+  for (const side of sides) {
+    const w = pf((cs as any)[`border${side}Width`]);
+    const style = (cs as any)[`border${side}Style`];
+    if (w > 0 && style !== 'none' && style !== 'hidden' && !isClearColor((cs as any)[`border${side}Color`])) return true;
+  }
+  return !!cs.boxShadow && cs.boxShadow !== 'none';
+}
+
+function hasPseudoContent(el: Element, win: Window): boolean {
+  for (const pseudo of ['::before', '::after']) {
+    const pcs = win.getComputedStyle(el, pseudo);
+    if (pcs.content && pcs.content !== 'none' && pcs.content !== 'normal' && pcs.display !== 'none') return true;
+  }
+  return false;
+}
+
+/**
+ * 앞뒤 글자와 하나의 텍스트 노드로 합쳐도 되는 인라인 요소인가.
+ * <strong>/<em>/<a>/<span> 처럼 글자 스타일만 바꾸는 display:inline 요소만 합친다.
+ * 배경·테두리가 있는 배지, 아이콘(svg·img), inline-block/block 요소, 가상요소가 있는 요소는
+ * 별도 노드로 남겨야 박스·위치가 보존된다.
+ */
+function isMergeableInline(el: Element, win: Window): boolean {
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'br') return true;
+  if (REPLACED_TAGS.has(tag)) return false;
+  if (SKIP_TAGS.has(tag)) return true;
+  const cs = win.getComputedStyle(el);
+  if (cs.display === 'none') return true;
+  if (cs.display !== 'inline') return false;
+  if (cs.position === 'absolute' || cs.position === 'fixed') return false;
+  if (hasBoxDecoration(cs) || hasPseudoContent(el, win)) return false;
+  return Array.from(el.children).every((c) => isMergeableInline(c, win));
+}
+
+type Run = { kind: 'text'; nodes: Node[] } | { kind: 'element'; el: Element };
+
+/**
+ * 자식 노드를 "합칠 수 있는 글자 흐름(text run)" 과 "독립 요소" 로 나눈다.
+ * 예) <p>Status: <span class="badge">Active</span></p> → [text "Status: "], [element span]
+ */
+function collectRuns(el: Element, win: Window): Run[] {
+  const runs: Run[] = [];
+  let cur: Node[] = [];
+  const flush = () => {
+    if (cur.some((n) => (n.textContent ?? '').trim().length > 0)) runs.push({ kind: 'text', nodes: cur });
+    cur = [];
+  };
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      cur.push(node);
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const child = node as Element;
+    const tag = child.tagName.toLowerCase();
+    if (tag === 'br') {
+      cur.push(child);
+      continue;
+    }
+    if (SKIP_TAGS.has(tag)) continue;
+    if (win.getComputedStyle(child).display === 'none') continue;
+    if (isMergeableInline(child, win)) {
+      cur.push(child);
+    } else {
+      flush();
+      runs.push({ kind: 'element', el: child });
+    }
+  }
+  flush();
+  return runs;
+}
+
+// ─── 텍스트 내용 (white-space 규칙 + 스타일 구간) ──────────────
+
+type WsMode = 'collapse' | 'preserve-breaks' | 'preserve';
+
+function wsMode(cs: CSSStyleDeclaration): WsMode {
+  const collapse = (cs as any).whiteSpaceCollapse as string | undefined;
+  if (collapse === 'preserve' || collapse === 'break-spaces') return 'preserve';
+  if (collapse === 'preserve-breaks') return 'preserve-breaks';
+  if (collapse === 'collapse') return 'collapse';
+  const ws = cs.whiteSpace;
+  if (ws === 'pre' || ws === 'pre-wrap' || ws === 'break-spaces') return 'preserve';
+  if (ws === 'pre-line') return 'preserve-breaks';
+  return 'collapse';
+}
+
+type SegStyle = Omit<TextSegment, 'text'>;
+const SEG_KEYS: (keyof SegStyle)[] = [
+  'fontFamily', 'fontWeight', 'fontStyle', 'fontSize', 'color', 'textDecoration', 'textTransform', 'letterSpacing',
+];
+
+/** text-decoration 은 상속되지 않지만 자손 글자에도 그려진다 → 조상까지 합쳐서 판단 */
+function effectiveDecoration(el: Element, win: Window): string {
+  const lines = new Set<string>();
+  for (let e: Element | null = el; e; e = e.parentElement) {
+    const line = win.getComputedStyle(e).textDecorationLine || '';
+    if (line.includes('underline')) lines.add('underline');
+    if (line.includes('line-through')) lines.add('line-through');
+  }
+  return Array.from(lines).join(' ') || 'none';
+}
+
+function segStyleOf(el: Element, win: Window): SegStyle {
+  const cs = win.getComputedStyle(el);
+  return {
+    fontFamily: cs.fontFamily,
+    fontWeight: cs.fontWeight,
+    fontStyle: cs.fontStyle,
+    fontSize: pf(cs.fontSize) || 14,
+    color: textColor(cs),
+    textDecoration: effectiveDecoration(el, win),
+    textTransform: cs.textTransform,
+    letterSpacing: cs.letterSpacing,
+  };
+}
+
+class TextBuilder {
+  text = '';
+  private segs: { text: string; style: SegStyle }[] = [];
+
+  private push(s: string, style: SegStyle): void {
+    if (!s) return;
+    const last = this.segs[this.segs.length - 1];
+    if (last && SEG_KEYS.every((k) => last.style[k] === style[k])) last.text += s;
+    else this.segs.push({ text: s, style });
+    this.text += s;
+  }
+
+  appendText(raw: string, cs: CSSStyleDeclaration, style: SegStyle): void {
+    const mode = wsMode(cs);
+    let s = raw;
+    if (mode === 'collapse') s = s.replace(/[ \t\n\r\f]+/g, ' ');
+    else if (mode === 'preserve-breaks') s = s.replace(/[ \t\r\f]+/g, ' ').replace(/ ?\n ?/g, '\n');
+    else s = s.replace(/\r\n?/g, '\n');
+    // 접히는 공백은 줄 첫머리·앞 공백 뒤에서 사라진다
+    if (mode !== 'preserve' && s.startsWith(' ') && (this.text === '' || /[ \n]$/.test(this.text))) s = s.slice(1);
+    this.push(s, style);
+  }
+
+  appendBreak(style: SegStyle): void {
+    this.trimTrailingSpace();
+    this.push('\n', style);
+  }
+
+  private trimTrailingSpace(): void {
+    while (this.text.endsWith(' ')) {
+      this.text = this.text.slice(0, -1);
+      const last = this.segs[this.segs.length - 1];
+      last.text = last.text.slice(0, -1);
+      if (!last.text) this.segs.pop();
+    }
+  }
+
+  /** 끝 공백과 마지막 <br> 이 만든 빈 줄을 정리하고, 기본 스타일과 다른 필드만 남긴 구간을 돌려준다 */
+  finish(base: SegStyle): { text: string; segments?: TextSegment[] } {
+    this.trimTrailingSpace();
+    if (this.text.endsWith('\n')) {
+      this.text = this.text.slice(0, -1);
+      const last = this.segs[this.segs.length - 1];
+      last.text = last.text.slice(0, -1);
+      if (!last.text) this.segs.pop();
+    }
+    const segments = this.segs.map((seg) => {
+      const out: TextSegment = { text: seg.text };
+      for (const k of SEG_KEYS) {
+        if (seg.style[k] !== base[k]) (out as any)[k] = seg.style[k];
+      }
+      return out;
+    });
+    const styled = segments.some((seg) => Object.keys(seg).length > 1);
+    return { text: this.text, segments: styled ? segments : undefined };
+  }
+}
+
+function walkInline(node: Node, b: TextBuilder, win: Window): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const parent = node.parentElement;
+    if (!parent) return;
+    b.appendText((node as Text).data, win.getComputedStyle(parent), segStyleOf(parent, win));
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const el = node as Element;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'br') {
+    if (el.parentElement) b.appendBreak(segStyleOf(el.parentElement, win));
+    return;
+  }
+  if (SKIP_TAGS.has(tag) || win.getComputedStyle(el).display === 'none') return;
+  for (const child of Array.from(el.childNodes)) walkInline(child, b, win);
+}
+
+// ─── 텍스트 위치 측정 (Range) ─────────────────────────────────
+
+interface Measured {
+  box: { left: number; top: number; right: number; bottom: number };
+  lines: number;
+}
+
+/** Range 가 그려진 줄 상자들의 합집합과 줄 수 (세로로 겹치는 상자는 같은 줄) */
+function measureRange(range: Range): Measured | null {
+  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0.5 && r.height > 0.5);
+  if (rects.length === 0) return null;
+  rects.sort((a, b) => a.top - b.top);
+  const box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+  let lines = 0;
+  let lineBottom = -Infinity;
+  let lineHeight = 0;
+  for (const r of rects) {
+    box.left = Math.min(box.left, r.left);
+    box.top = Math.min(box.top, r.top);
+    box.right = Math.max(box.right, r.right);
+    box.bottom = Math.max(box.bottom, r.bottom);
+    if (r.top >= lineBottom - Math.min(r.height, lineHeight) * 0.5) {
+      lines++;
+      lineBottom = r.bottom;
+      lineHeight = r.height;
+    } else {
+      lineBottom = Math.max(lineBottom, r.bottom);
+    }
+  }
+  return { box, lines };
+}
+
+/** content box (border·padding 안쪽) — 요소 rect 기준 */
+function contentBox(cs: CSSStyleDeclaration, rect: DOMRect): { x: number; y: number; width: number; height: number } {
+  const x = pf(cs.borderLeftWidth) + pf(cs.paddingLeft);
+  const y = pf(cs.borderTopWidth) + pf(cs.paddingTop);
+  return {
+    x,
+    y,
+    width: Math.max(rect.width - x - pf(cs.borderRightWidth) - pf(cs.paddingRight), 0),
+    height: Math.max(rect.height - y - pf(cs.borderBottomWidth) - pf(cs.paddingBottom), 0),
+  };
+}
+
+/** text-overflow:ellipsis(한 줄) / -webkit-line-clamp(N 줄) 말줄임 */
+function truncationOf(cs: CSSStyleDeclaration): { maxLines: number } | undefined {
+  const clamp = parseInt((cs as any).webkitLineClamp, 10);
+  if (clamp > 0) return { maxLines: clamp };
+  const clips = cs.overflowX !== 'visible' || cs.overflow !== 'visible';
+  const nowrap = cs.whiteSpace === 'nowrap' || cs.whiteSpace === 'pre' || (cs as any).textWrapMode === 'nowrap';
+  if (cs.textOverflow === 'ellipsis' && clips && nowrap) return { maxLines: 1 };
+  return undefined;
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** 텍스트 노드가 가진 글자·스타일 구간·측정값을 채운다 */
+function fillText(
+  target: DomNodeData,
+  built: { text: string; segments?: TextSegment[] },
+  measured: Measured,
+  origin: { left: number; top: number },
+  wrap: { x: number; width: number },
+  truncate: { maxLines: number } | undefined,
+): void {
+  target.text = built.text;
+  target.textSegments = built.segments;
+  target.textBox = {
+    x: round2(measured.box.left - origin.left),
+    y: round2(measured.box.top - origin.top),
+    width: round2(measured.box.right - measured.box.left),
+    height: round2(measured.box.bottom - measured.box.top),
+  };
+  target.wrapBox = { x: round2(wrap.x), width: round2(wrap.width) };
+  target.lineCount = measured.lines;
+  if (truncate) target.truncate = truncate;
+}
+
+/** 배경·테두리·여백을 뺀 순수 글자 스타일 (부모 프레임이 박스를 이미 그린다) */
+function plainTextStyle(cs: CSSStyleDeclaration): DomStyleData {
+  return {
+    ...extractStyle(cs),
+    backgroundColor: 'transparent',
+    backgroundImage: '',
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+    borderColor: 'transparent',
+    borderStyle: 'none',
+    boxShadow: 'none',
+    paddingTop: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    opacity: 1,
+  };
+}
+
+/** 여러 요소 사이에 흐르는 글자 묶음 → 가상 #text 자식 노드 */
+function textRunNode(parent: Element, parentCs: CSSStyleDeclaration, parentRect: DOMRect, nodes: Node[]): DomNodeData | null {
+  const win = winOf(parent);
+  const b = new TextBuilder();
+  for (const n of nodes) walkInline(n, b, win);
+  const built = b.finish(segStyleOf(parent, win));
+  if (!built.text.trim()) return null;
+
+  const range = parent.ownerDocument.createRange();
+  range.setStartBefore(nodes[0]);
+  range.setEndAfter(nodes[nodes.length - 1]);
+  const m = measureRange(range);
+  if (!m) return null;
+
+  const node: DomNodeData = {
+    tagName: '#text',
+    rect: {
+      x: round2(m.box.left - parentRect.left),
+      y: round2(m.box.top - parentRect.top),
+      width: round2(m.box.right - m.box.left),
+      height: round2(m.box.bottom - m.box.top),
+    },
+    visible: true,
+    style: plainTextStyle(parentCs),
+    children: [],
+  };
+  const cb = contentBox(parentCs, parentRect);
+  const origin = { left: m.box.left, top: m.box.top };
+  fillText(node, built, m, origin, { x: parentRect.left + cb.x - m.box.left, width: cb.width }, undefined);
+  return node;
+}
+
+/** input·textarea·select 의 표시 글자 (Range 로 잴 수 없어 content box 기준으로 배치) */
+function fillFormText(el: Element, cs: CSSStyleDeclaration, rect: DOMRect, node: DomNodeData): boolean {
+  const inputEl = el as HTMLInputElement;
+  const val = inputEl.value?.trim();
+  const ph = el.getAttribute('placeholder')?.trim();
+  const text = val || ph;
+  if (!text) return false;
+  node.text = text;
+  const cb = contentBox(cs, rect);
+  const isTextarea = el.tagName.toLowerCase() === 'textarea';
+  const lineH = parseFloat(cs.lineHeight) || (pf(cs.fontSize) || 14) * 1.2;
+  const lines = isTextarea ? text.split('\n').length : 1;
+  // input 글자는 세로 가운데, textarea 는 위쪽부터 채워진다
+  const height = isTextarea ? Math.min(lines * lineH, cb.height || lines * lineH) : cb.height;
+  node.textBox = { x: round2(cb.x), y: round2(cb.y), width: round2(cb.width), height: round2(height) };
+  node.wrapBox = { x: round2(cb.x), width: round2(cb.width) };
+  node.lineCount = lines;
+  if (!val && ph) {
+    try {
+      const phColor = normalizeCssColor(winOf(el).getComputedStyle(el, '::placeholder').color);
+      if (phColor && phColor !== 'transparent') node.style.color = phColor;
+    } catch { /* ::placeholder not supported */ }
+  }
+  return true;
+}
+
 /**
  * @param el 직렬화할 DOM 요소 (position:fixed 는 render.ts prepareForCapture 에서 absolute 로 바뀐 상태)
  * @param parentRect 부모의 getBoundingClientRect (상대 좌표 계산용)
@@ -198,264 +572,93 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   // 크기가 0이면 렌더링 안 된 요소
   if (rect.width < 1 || rect.height < 1) return null;
 
+  const relRect = {
+    x: Math.round(rect.left - parentRect.left),
+    y: Math.round(rect.top - parentRect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
+
   // SVG: outerHTML을 직렬화하여 Figma에서 createNodeFromSvg로 재현
   if (tag === 'svg') {
     return {
       tagName: 'svg',
       svgHtml: serializeSvg(el as SVGElement, cs),
-      rect: {
-        x: Math.round(rect.left - parentRect.left),
-        y: Math.round(rect.top - parentRect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      },
+      rect: relRect,
       visible: true,
       style: extractStyle(cs),
       children: [],
     };
   }
 
-  // 자식 element 목록 (스킵 태그 제외)
-  const elementChildren = Array.from(el.children).filter(
-    (c) => !SKIP_TAGS.has(c.tagName.toLowerCase())
-  );
+  const node: DomNodeData = { tagName: tag, rect: relRect, visible: true, style: extractStyle(cs), children: [] };
 
-  // ── 혼합 콘텐츠 감지 ──────────────────────────────
-  // 텍스트 노드 + 엘리먼트 자식이 공존하는 경우 처리
-  const hasSignificantTextNodes = Array.from(el.childNodes).some(
-    (n) => n.nodeType === Node.TEXT_NODE && (n.textContent?.trim() ?? '').length > 0
-  );
-
-  // <br> 존재 여부: 있으면 텍스트 병합 대신 childNodes 순회로 줄바꿈 보존
-  const hasBr = Array.from(el.children).some(
-    (c) => c.tagName.toLowerCase() === 'br'
-  );
-
-  let text: string | undefined;
-  let textSegments: TextSegment[] | undefined;
-
-  if (elementChildren.length === 0 && !hasBr) {
-    // 자식 element 없음, <br>도 없음 → 텍스트 리프
-    const t = el.textContent?.trim();
-    if (t) text = t;
-  } else if (hasSignificantTextNodes) {
-    // 혼합 콘텐츠: 텍스트 노드 + 엘리먼트 자식 공존
-    const allInline = elementChildren.every(
-      (c) => INLINE_TEXT_TAGS.has(c.tagName.toLowerCase())
-    );
-    if (allInline && !hasBr) {
-      // <p>텍스트<strong>볼드</strong>텍스트</p> 같은 패턴 (br 없음)
-      // → 전체 textContent를 하나의 텍스트 리프로 병합 + bold 세그먼트 추출
-      const t = el.textContent?.trim();
-      if (t) {
-        text = t;
-        textSegments = extractTextSegments(el);
-      }
-    }
-    // allInline이 아닌 경우 또는 <br> 포함: 아래에서 childNodes 순회로 처리
+  if (FORM_TAGS.has(tag)) {
+    fillFormText(el, cs, rect, node);
+    return node;
   }
-
-  // Form 요소: placeholder/value를 텍스트로 추출
-  // <input>, <textarea>는 textContent가 빈 문자열이므로 별도 처리
-  let isPlaceholder = false;
-  if (!text && (tag === 'input' || tag === 'textarea' || tag === 'select')) {
-    const inputEl = el as HTMLInputElement;
-    const val = inputEl.value?.trim();
-    const ph = el.getAttribute('placeholder')?.trim();
-    if (val) {
-      text = val;
-    } else if (ph) {
-      text = ph;
-      isPlaceholder = true;
-    }
-  }
-
-  let imageUrl: string | undefined;
   if (tag === 'img') {
-    imageUrl = (el as HTMLImageElement).src || undefined;
+    node.imageUrl = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || undefined;
+    return node;
   }
 
-  // 재귀: 자식 직렬화 (현재 element rect를 parentRect로 사용)
-  const children: DomNodeData[] = [];
-  if (!text) {
-    if (hasSignificantTextNodes && (elementChildren.length > 0 || hasBr)) {
-      // 혼합 콘텐츠 또는 <br> 포함 → childNodes 순회 (줄바꿈·색상 보존)
-      for (const childNode of Array.from(el.childNodes)) {
-        if (childNode.nodeType === Node.TEXT_NODE) {
-          const trimmed = childNode.textContent?.trim();
-          if (!trimmed) continue;
-          // Range API로 텍스트 노드의 정확한 위치/크기 측정
-          const range = el.ownerDocument.createRange();
-          range.selectNodeContents(childNode);
-          const textRect = range.getBoundingClientRect();
-          if (textRect.width < 1 || textRect.height < 1) continue;
-          // 부모 스타일 상속하되 배경/테두리 제거 (부모 프레임이 이미 처리)
-          const textStyle: DomStyleData = {
-            ...extractStyle(cs),
-            backgroundColor: 'transparent',
-            backgroundImage: '',
-            borderTopWidth: 0,
-            borderRightWidth: 0,
-            borderBottomWidth: 0,
-            borderLeftWidth: 0,
-            borderColor: 'transparent',
-            borderStyle: 'none',
-            paddingTop: 0,
-            paddingRight: 0,
-            paddingBottom: 0,
-            paddingLeft: 0,
-          };
-          children.push({
-            tagName: '#text',
-            text: trimmed,
-            rect: {
-              x: Math.round(textRect.left - rect.left),
-              y: Math.round(textRect.top - rect.top),
-              width: Math.round(textRect.width),
-              height: Math.round(textRect.height),
-            },
-            visible: true,
-            style: textStyle,
-            children: [],
-          });
-        } else if (childNode.nodeType === Node.ELEMENT_NODE) {
-          const childEl = childNode as Element;
-          if (!SKIP_TAGS.has(childEl.tagName.toLowerCase())) {
-            const childData = serializeDom(childEl, rect);
-            if (childData) children.push(childData);
-          }
-        }
-      }
-    } else {
-      for (const child of elementChildren) {
-        const childData = serializeDom(child, rect);
-        if (childData) children.push(childData);
-      }
+  // ── 글자 흐름 / 자식 요소 분리 ──────────────────────
+  const runs = collectRuns(el, win);
+  // 수치 기준점: 노드 rect 는 반올림되므로 반올림된 원점 기준으로 텍스트 위치를 잰다
+  const origin = { left: parentRect.left + relRect.x, top: parentRect.top + relRect.y };
+  if (runs.length === 1 && runs[0].kind === 'text') {
+    // 텍스트 리프: 요소 전체가 하나의 글자 흐름
+    const b = new TextBuilder();
+    for (const n of Array.from(el.childNodes)) walkInline(n, b, win);
+    const built = b.finish(segStyleOf(el, win));
+    const range = el.ownerDocument.createRange();
+    range.selectNodeContents(el);
+    const m = built.text.trim() ? measureRange(range) : null;
+    if (m) {
+      const truncate = truncationOf(cs);
+      const cb = contentBox(cs, rect);
+      // 인라인 요소는 content box 가 사각형이 아니므로 실제 글자 폭을 줄바꿈 기준으로 쓴다
+      const wrap = cs.display === 'inline' && !truncate
+        ? { x: m.box.left - origin.left, width: m.box.right - m.box.left }
+        : { x: rect.left + cb.x - origin.left, width: cb.width };
+      fillText(node, built, m, origin, wrap, truncate);
+    }
+  } else {
+    for (const run of runs) {
+      const child = run.kind === 'text'
+        ? textRunNode(el, cs, new DOMRect(origin.left, origin.top, rect.width, rect.height), run.nodes)
+        : serializeDom(run.el, new DOMRect(origin.left, origin.top, rect.width, rect.height));
+      if (child) node.children.push(child);
     }
   }
 
   // ::before / ::after 의사 요소 추출
   const pseudoBefore = extractPseudoElement(el, '::before');
-  if (pseudoBefore) children.unshift(pseudoBefore);
+  if (pseudoBefore) node.children.unshift(pseudoBefore);
   const pseudoAfter = extractPseudoElement(el, '::after');
-  if (pseudoAfter) children.push(pseudoAfter);
+  if (pseudoAfter) node.children.push(pseudoAfter);
 
-  // 텍스트와 의사 요소(또는 다른 자식)가 공존하면
-  // 텍스트를 명시적 #text 자식 노드로 변환 (buildTree에서 text+children 동시 처리 불가)
-  if (text && children.length > 0) {
-    const pl = pf(cs.paddingLeft);
-    const pt = pf(cs.paddingTop);
-    const textStyle: DomStyleData = {
-      ...extractStyle(cs),
-      backgroundColor: 'transparent',
-      backgroundImage: '',
-      borderTopWidth: 0, borderRightWidth: 0,
-      borderBottomWidth: 0, borderLeftWidth: 0,
-      borderColor: 'transparent', borderStyle: 'none',
-      paddingTop: 0, paddingRight: 0,
-      paddingBottom: 0, paddingLeft: 0,
-    };
-    children.push({
+  // 텍스트와 의사 요소가 공존하면 텍스트를 측정된 위치의 #text 자식 노드로 옮긴다
+  // (buildTree 에서 text+children 동시 처리 불가)
+  if (node.text && node.children.length > 0 && node.textBox) {
+    const box = node.textBox;
+    node.children.push({
       tagName: '#text',
-      text,
-      textSegments,
-      rect: {
-        x: Math.round(pl),
-        y: Math.round(pt),
-        width: Math.round(rect.width - pl - pf(cs.paddingRight)),
-        height: Math.round(rect.height - pt - pf(cs.paddingBottom)),
-      },
+      text: node.text,
+      textSegments: node.textSegments,
+      textBox: { x: 0, y: 0, width: box.width, height: box.height },
+      wrapBox: node.wrapBox ? { x: round2(node.wrapBox.x - box.x), width: node.wrapBox.width } : undefined,
+      lineCount: node.lineCount,
+      truncate: node.truncate,
+      rect: { x: box.x, y: box.y, width: box.width, height: box.height },
       visible: true,
-      style: textStyle,
+      style: plainTextStyle(cs),
       children: [],
     });
-    text = undefined;
-    textSegments = undefined;
+    for (const k of ['text', 'textSegments', 'textBox', 'wrapBox', 'lineCount', 'truncate'] as const) delete node[k];
   }
 
-  // 스타일: placeholder 텍스트면 ::placeholder 색상 사용
-  const nodeStyle = extractStyle(cs);
-  if (isPlaceholder) {
-    try {
-      const phCs = win.getComputedStyle(el, '::placeholder');
-      const phColor = normalizeCssColor(phCs.color);
-      if (phColor && phColor !== 'transparent') nodeStyle.color = phColor;
-    } catch { /* ::placeholder not supported */ }
-  }
-
-  return {
-    tagName: tag,
-    text,
-    textSegments,
-    imageUrl,
-    rect: {
-      x: Math.round(rect.left - parentRect.left),
-      y: Math.round(rect.top - parentRect.top),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-    },
-    visible: cs.visibility !== 'hidden',
-    style: nodeStyle,
-    children,
-  };
-}
-
-/**
- * 인라인 혼합 콘텐츠에서 텍스트 세그먼트 + bold 여부를 추출.
- * 예: <p>텍스트<strong>볼드</strong>나머지</p>
- *   → [{ text:"텍스트", bold:false }, { text:"볼드", bold:true }, { text:"나머지", bold:false }]
- */
-function extractTextSegments(el: Element): TextSegment[] {
-  const win = winOf(el);
-  const parentColor = normalizeCssColor(win.getComputedStyle(el).color);
-  // el.textContent.trim()과 정확히 일치하는 세그먼트 배열을 생성한다.
-  // trim된 전체 텍스트를 기준으로 각 세그먼트의 위치를 매핑해야
-  // code.ts의 setRangeFills/setRangeFontName offset이 정확하다.
-  const fullText = (el.textContent || '').trim();
-  if (!fullText) return [];
-
-  const segments: TextSegment[] = [];
-  let cursor = 0; // fullText 내 현재 위치
-
-  for (const node of Array.from(el.childNodes)) {
-    let rawText = '';
-    let bold: boolean | undefined;
-    let color: string | undefined;
-
-    if (node.nodeType === Node.TEXT_NODE) {
-      rawText = node.textContent || '';
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      const childEl = node as Element;
-      const childCs = win.getComputedStyle(childEl);
-      const isBold = parseInt(childCs.fontWeight) >= 700;
-      const childColor = normalizeCssColor(childCs.color);
-      rawText = childEl.textContent || '';
-      bold = isBold || undefined;
-      color = childColor && childColor !== parentColor ? childColor : undefined;
-    } else {
-      continue;
-    }
-
-    if (!rawText) continue;
-
-    // rawText에서 fullText[cursor..]에 매칭되는 부분만 추출
-    // (앞뒤 공백, 줄바꿈 등이 trim으로 사라진 경우 보정)
-    for (let i = 0; i < rawText.length && cursor < fullText.length; i++) {
-      const ch = rawText[i];
-      if (ch === fullText[cursor]) {
-        // 이 문자는 fullText에 존재 → 현재 세그먼트에 추가
-        if (segments.length === 0 || segments[segments.length - 1].bold !== bold || segments[segments.length - 1].color !== color) {
-          segments.push({ text: ch, bold, color });
-        } else {
-          segments[segments.length - 1].text += ch;
-        }
-        cursor++;
-      }
-      // fullText에 없는 공백/줄바꿈은 건너뜀
-    }
-  }
-
-  return segments;
+  return node;
 }
 
 /**

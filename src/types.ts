@@ -15,6 +15,8 @@ export interface DomStyleData {
   textAlign: string;
   letterSpacing: string;
   textDecoration: string;
+  textTransform: string;
+  direction: string;
 
   // 테두리
   borderTopLeftRadius: number;
@@ -47,17 +49,38 @@ export interface DomStyleData {
   position: string;
 }
 
-/** 인라인 혼합 콘텐츠의 스타일 세그먼트 (bold 등) */
+/**
+ * 인라인 혼합 콘텐츠의 스타일 구간.
+ * 세그먼트 text 를 이어 붙이면 노드의 text 와 정확히 같다.
+ * 스타일 필드는 노드 기본 스타일과 다를 때만 채운다.
+ */
 export interface TextSegment {
   text: string;
-  bold?: boolean;
-  color?: string;  // 부모와 다른 색상일 때 개별 색상
+  fontFamily?: string;
+  fontWeight?: string;
+  fontStyle?: string;
+  fontSize?: number;
+  color?: string;
+  textDecoration?: string;
+  textTransform?: string;
+  letterSpacing?: string;
+}
+
+export interface TextBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface DomNodeData {
   tagName: string;
-  text?: string;           // 텍스트 리프 노드의 텍스트 콘텐츠
-  textSegments?: TextSegment[];  // 인라인 혼합 콘텐츠의 볼드 세그먼트
+  text?: string;           // 텍스트 리프 노드의 텍스트 콘텐츠 (공백은 CSS white-space 규칙대로 접힌 상태)
+  textSegments?: TextSegment[];  // 인라인 혼합 콘텐츠의 스타일 구간
+  textBox?: TextBox;       // 실제 글자 줄 상자들의 합집합 (노드 rect 기준, Range 로 측정)
+  wrapBox?: { x: number; width: number };  // 여러 줄일 때 줄바꿈 기준 폭 (content box, 노드 rect 기준)
+  lineCount?: number;      // 브라우저에서 실제로 그려진 줄 수
+  truncate?: { maxLines: number };  // text-overflow:ellipsis / -webkit-line-clamp
   imageUrl?: string;       // <img> src
   svgHtml?: string;        // <svg> 직렬화 HTML (<use> 참조 인라인 처리 후)
   rect: {

@@ -43,11 +43,19 @@ text nodes, and vectors.
 - **Korean font fallback chain** — Pretendard > Noto Sans KR > Inter, so Korean text always renders.
 - **Font weight 100–900** — mapped to the correct Figma style name with `SemiBold` / `Semi Bold`
   variant handling to avoid silent fallback to Regular.
-- **Italic, line-height, letter-spacing, and text-align** all preserved.
-- **Bold segments** — inline `<strong>` / `<b>` inside a paragraph are applied as Figma
-  character-range overrides.
-- **Smart text sizing** — single-line text uses auto-width to prevent wrapping; multi-line text uses
-  fixed-width with proper alignment.
+- **Italic, line-height, letter-spacing, text-align, and text-transform** all preserved
+  (`uppercase` / `lowercase` / `capitalize` become Figma text case).
+- **Styled inline runs** — inline `<strong>`, `<em>`, `<a>`, `<span>`, … inside a paragraph become
+  character-range overrides for weight, italic, font family, size, color, underline/strike-through,
+  text case, and letter spacing.
+- **Measured text placement** — every text layer is placed on the glyph area the browser actually
+  drew (measured with the Range API), so padding, flex/grid alignment, and `text-align` (including
+  `start`/`end`) land exactly. Text that wraps in the browser keeps the element's content width and
+  wraps at the same place; single-line text uses auto-width so it never wraps unexpectedly.
+- **Whitespace** — source indentation and line breaks collapse like the browser does, while `pre`,
+  `pre-wrap`, and `pre-line` keep theirs.
+- **Truncation** — `text-overflow: ellipsis` and `-webkit-line-clamp` become Figma ending
+  truncation with the same max lines.
 
 ### SVG & Images
 
@@ -62,12 +70,10 @@ text nodes, and vectors.
 
 - **Pseudo-elements** — `::before` and `::after` with backgrounds, gradients, or border-radius (
   e.g., radio-button dots) are extracted as virtual child nodes.
-- **Mixed content** — `<p>text <strong>bold</strong> text</p>` is merged into a single Figma text
-  node with per-range bold.
-- **`<br>` line breaks** — when `<br>` is present, each text segment is measured independently via
-  the Range API so line breaks and per-span colors are preserved.
-- **Flex centering** — `justify-content: center` and `align-items: center` are translated to Figma
-  text positioning. Buttons and links are always vertically centered.
+- **Mixed content** — `<p>text <strong>bold</strong><br>text</p>` becomes a single Figma text node
+  with styled ranges and line breaks. Inline pieces that draw their own box — badges with a
+  background, icons, `inline-block` or `display: block` children — stay separate layers at their
+  measured positions. Children hidden with `display: none` are left out.
 - **CSS color normalization** — oklch, `color(srgb ...)`, space-separated `rgb()`, and any other
   format are converted to legacy `rgb()` via a Canvas 2D round-trip.
 

@@ -534,6 +534,137 @@ function applyFrameStyle(frame: FrameNode, s: DomStyleData, w: number, h: number
   frame.clipsContent = s.overflow === 'hidden' || s.overflow === 'clip';
 }
 
+// ─── 텍스트 노드 ──────────────────────────────────────────────
+
+const isItalic = (fontStyle: string | undefined) => fontStyle === 'italic' || !!fontStyle?.startsWith('oblique');
+
+function toTextAlign(textAlign: string, direction: string): 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED' {
+  const rtl = direction === 'rtl';
+  switch (textAlign) {
+    case 'center':
+    case '-webkit-center':
+    case '-internal-center':
+      return 'CENTER';
+    case 'right':
+    case '-webkit-right':
+      return 'RIGHT';
+    case 'left':
+    case '-webkit-left':
+      return 'LEFT';
+    case 'justify':
+      return 'JUSTIFIED';
+    case 'end':
+      return rtl ? 'LEFT' : 'RIGHT';
+    default: // start
+      return rtl ? 'RIGHT' : 'LEFT';
+  }
+}
+
+function toTextCase(textTransform: string | undefined): TextCase {
+  switch (textTransform) {
+    case 'uppercase': return 'UPPER';
+    case 'lowercase': return 'LOWER';
+    case 'capitalize': return 'TITLE';
+    default: return 'ORIGINAL';
+  }
+}
+
+function toTextDecoration(decoration: string | undefined): TextDecoration {
+  if (decoration?.includes('underline')) return 'UNDERLINE';
+  if (decoration?.includes('line-through')) return 'STRIKETHROUGH';
+  return 'NONE';
+}
+
+function toLetterSpacing(letterSpacing: string | undefined): LetterSpacing | null {
+  if (!letterSpacing || letterSpacing === 'normal') return null;
+  const v = parseFloat(letterSpacing);
+  return isNaN(v) || v === 0 ? null : { value: v, unit: 'PIXELS' };
+}
+
+/** 인라인 요소의 굵기·이탤릭·글꼴·크기·색·밑줄·대소문자 구간 적용 */
+async function applySegments(t: TextNode, node: DomNodeData): Promise<void> {
+  const { style, textSegments } = node;
+  if (!textSegments) return;
+  const baseFont = t.fontName as FontName;
+  let offset = 0;
+  for (const seg of textSegments) {
+    const start = offset;
+    const end = offset + seg.text.length;
+    offset = end;
+    if (end <= start || end > t.characters.length) continue;
+    if (seg.fontFamily || seg.fontWeight || seg.fontStyle) {
+      const family = mapFontFamily(seg.fontFamily ?? style.fontFamily);
+      const figmaStyle = weightToFigmaStyle(seg.fontWeight ?? style.fontWeight, isItalic(seg.fontStyle ?? style.fontStyle));
+      const font = await loadBestFont(family, figmaStyle);
+      if (font.family !== baseFont.family || font.style !== baseFont.style) t.setRangeFontName(start, end, font);
+    }
+    if (seg.fontSize) t.setRangeFontSize(start, end, Math.max(seg.fontSize, 1));
+    if (seg.color) {
+      const paint = toSolidPaint(seg.color);
+      if (paint) t.setRangeFills(start, end, [paint]);
+    }
+    if (seg.textDecoration) t.setRangeTextDecoration(start, end, toTextDecoration(seg.textDecoration));
+    if (seg.textTransform) t.setRangeTextCase(start, end, toTextCase(seg.textTransform));
+    if (seg.letterSpacing) {
+      t.setRangeLetterSpacing(start, end, toLetterSpacing(seg.letterSpacing) ?? { value: 0, unit: 'PIXELS' });
+    }
+  }
+}
+
+/**
+ * 텍스트 노드 생성 + 배치.
+ * 위치·줄바꿈은 브라우저에서 Range 로 잰 실제 글자 영역(textBox)과 줄 수(lineCount)로 정한다.
+ * - 말줄임: content box 폭 고정 + maxLines
+ * - 여러 줄: content box 폭 고정(HEIGHT) → 브라우저와 같은 폭에서 줄바꿈
+ * - 한 줄: 자동 폭(WIDTH_AND_HEIGHT) → Figma 글꼴 폭 차이로 줄바꿈되지 않게 하고, 정렬 기준점(왼쪽/가운데/오른쪽)에 맞춘다
+ * 세로는 글자 영역 중심에 맞춘다.
+ * @param ox, oy 노드 rect 원점의 부모 기준 좌표
+ */
+async function createTextNode(node: DomNodeData, ox: number, oy: number): Promise<TextNode> {
+  const { style, rect } = node;
+  const family = mapFontFamily(style.fontFamily);
+  const fontName = await loadBestFont(family, weightToFigmaStyle(style.fontWeight, isItalic(style.fontStyle)));
+
+  const t = figma.createText();
+  t.fontName = fontName;
+  t.fontSize = Math.max(style.fontSize, 1);
+  t.characters = node.text ?? '';
+  const textPaint = toSolidPaint(style.color);
+  if (textPaint) t.fills = [textPaint];
+  const lh = parseFloat(style.lineHeight);
+  if (!isNaN(lh) && lh > 0 && style.lineHeight !== 'normal') t.lineHeight = { value: lh, unit: 'PIXELS' };
+  const ls = toLetterSpacing(style.letterSpacing);
+  if (ls) t.letterSpacing = ls;
+  const decoration = toTextDecoration(style.textDecoration);
+  if (decoration !== 'NONE') t.textDecoration = decoration;
+  const textCase = toTextCase(style.textTransform);
+  if (textCase !== 'ORIGINAL') t.textCase = textCase;
+  const align = toTextAlign(style.textAlign, style.direction);
+  t.textAlignHorizontal = align;
+  await applySegments(t, node);
+
+  const box = node.textBox ?? { x: 0, y: 0, width: rect.width, height: rect.height };
+  const wrap = node.wrapBox ?? { x: box.x, width: box.width };
+  if (node.truncate) {
+    t.textAutoResize = 'HEIGHT';
+    t.resize(Math.max(wrap.width, 1), Math.max(box.height, 1));
+    t.textTruncation = 'ENDING';
+    t.maxLines = node.truncate.maxLines;
+    t.x = ox + wrap.x;
+  } else if ((node.lineCount ?? 1) > 1) {
+    t.textAutoResize = 'HEIGHT';
+    t.resize(Math.max(wrap.width, 1), Math.max(box.height, 1));
+    t.x = ox + wrap.x;
+  } else {
+    t.textAutoResize = 'WIDTH_AND_HEIGHT';
+    if (align === 'CENTER') t.x = ox + box.x + box.width / 2 - t.width / 2;
+    else if (align === 'RIGHT') t.x = ox + box.x + box.width - t.width;
+    else t.x = ox + box.x;
+  }
+  t.y = oy + box.y + box.height / 2 - t.height / 2;
+  return t;
+}
+
 // ─── 재귀 노드 빌더 ───────────────────────────────────────────
 
 let frameCount = 0;
@@ -546,88 +677,12 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
 
   // ── 텍스트 리프 노드 ──────────────────────────────
   if (text && children.length === 0) {
-    const family = mapFontFamily(style.fontFamily);
-    const isItalic = style.fontStyle === 'italic' || style.fontStyle === 'oblique';
-    const figmaStyle = weightToFigmaStyle(style.fontWeight, isItalic);
-    const fontName = await loadBestFont(family, figmaStyle);
-
-    // 텍스트 노드 공통 생성 헬퍼
-    // fixedWidth > 0 → HEIGHT 모드(고정 폭, text-align 동작)
-    // fixedWidth = 0 → WIDTH_AND_HEIGHT 모드(inline 요소 등)
-    const makeText = (tx: number, ty: number, fixedWidth = 0): TextNode => {
-      const t = figma.createText();
-      t.fontName = fontName;
-      t.fontSize = Math.max(style.fontSize, 1);
-      t.characters = text!;
-      const textPaint = toSolidPaint(style.color);
-      if (textPaint) t.fills = [textPaint];
-      const alignMap: Record<string, 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED'> = {
-        left: 'LEFT', center: 'CENTER', right: 'RIGHT', justify: 'JUSTIFIED',
-      };
-      t.textAlignHorizontal = alignMap[style.textAlign] ?? 'LEFT';
-      const lh = parseFloat(style.lineHeight);
-      if (!isNaN(lh) && lh > 0 && style.lineHeight !== 'normal') {
-        t.lineHeight = { value: Math.round(lh), unit: 'PIXELS' };
-      }
-      const ls = parseFloat(style.letterSpacing);
-      if (!isNaN(ls) && style.letterSpacing !== 'normal' && style.letterSpacing !== '0px') {
-        t.letterSpacing = { value: ls, unit: 'PIXELS' };
-      }
-      // text-decoration: underline / line-through
-      if (style.textDecoration.includes('underline')) {
-        t.textDecoration = 'UNDERLINE';
-      } else if (style.textDecoration.includes('line-through')) {
-        t.textDecoration = 'STRIKETHROUGH';
-      }
-      if (fixedWidth > 0) {
-        // 블록 요소: 고정 폭 + HEIGHT 자동 → text-align(center/right 등) 동작
-        t.textAutoResize = 'HEIGHT';
-        t.resize(Math.max(fixedWidth, 10), 20);
-      } else {
-        // 인라인 요소: Figma가 폰트 메트릭으로 폭/높이 자동 결정
-        t.textAutoResize = 'WIDTH_AND_HEIGHT';
-      }
-      t.x = tx;
-      t.y = ty;
-      return t;
-    };
-
-    // bold/color 세그먼트 적용 헬퍼
-    const applyBoldSegments = async (t: TextNode): Promise<void> => {
-      if (!textSegments || textSegments.length === 0) return;
-      let offset = 0;
-      for (const seg of textSegments) {
-        const len = seg.text.length;
-        if (len > 0 && offset + len <= t.characters.length) {
-          if (seg.bold) {
-            const boldFont = await loadBestFont(family, weightToFigmaStyle('700', isItalic));
-            t.setRangeFontName(offset, offset + len, boldFont);
-          }
-          if (seg.color) {
-            const segPaint = toSolidPaint(seg.color);
-            if (segPaint) t.setRangeFills(offset, offset + len, [segPaint]);
-          }
-        }
-        offset += len;
-      }
-    };
-
     // 배지/버튼: 테두리 또는 배경이 있으면 Frame으로 감싸 박스 스타일 재현
     const bw = Math.max(style.borderTopWidth, style.borderRightWidth,
       style.borderBottomWidth, style.borderLeftWidth);
     const hasBorder = bw > 0 && style.borderStyle !== 'none' && !isTransparent(style.borderColor);
     const hasBg = !isTransparent(style.backgroundColor) ||
       (style.backgroundImage !== '' && style.backgroundImage !== 'none');
-
-    // 한 줄 텍스트 판단: 높이가 폰트 크기의 3.5배 미만이면 줄바꿈 금지
-    // (text-base(16px) + h-[50px] 버튼 등이 올바르게 단일 행으로 처리됨)
-    const isSingleLine = h < style.fontSize * 3.5;
-
-    // HEIGHT(고정 폭) vs WIDTH_AND_HEIGHT(자동 폭) 판단 헬퍼
-    const calcFixedWidth = (containerW: number): number => {
-      const estMin = style.fontSize * (text?.length ?? 1);
-      return containerW > estMin * 1.5 ? containerW : 0;
-    };
 
     if (hasBorder || hasBg) {
       const frame = figma.createFrame();
@@ -636,40 +691,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       frame.x = rect.x;
       frame.y = rect.y;
       applyFrameStyle(frame, style, w, h);
-
-      if (isSingleLine) {
-        // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 절대 방지
-        const t = makeText(style.paddingLeft, style.paddingTop, 0);
-        await applyBoldSegments(t);
-        // 가로 정렬
-        const isFlex = style.display.includes('flex');
-        if (isFlex && style.justifyContent === 'center') {
-          t.x = Math.round((w - t.width) / 2);
-        } else if (style.textAlign === 'center') {
-          t.x = Math.round((w - t.width) / 2);
-        }
-        // 세로 정렬
-        if (isFlex && style.alignItems === 'center') {
-          t.y = Math.round((h - t.height) / 2);
-        } else if (tagName === 'button' || tagName === 'a') {
-          t.y = Math.round((h - t.height) / 2);
-        }
-        frame.appendChild(t);
-      } else {
-        // 여러 줄 가능: 고정 폭
-        const textAreaW = Math.max(w - style.paddingLeft - style.paddingRight, 10);
-        const t = makeText(style.paddingLeft, style.paddingTop, textAreaW);
-        await applyBoldSegments(t);
-        // 세로 정렬 (flex center 또는 button/a 태그)
-        const isFlex2 = style.display.includes('flex');
-        if (isFlex2 && style.alignItems === 'center') {
-          t.y = Math.round((h - t.height) / 2);
-        } else if (tagName === 'button' || tagName === 'a') {
-          t.y = Math.round((h - t.height) / 2);
-        }
-        frame.appendChild(t);
-      }
-
+      frame.appendChild(await createTextNode(node, 0, 0));
       applyEffects(frame, style);
       if (!visible) frame.visible = false;
       parent.appendChild(frame);
@@ -678,57 +700,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       return;
     }
 
-    // 일반 텍스트 리프
-    // center/right 정렬:
-    // ① WIDTH_AND_HEIGHT 모드로 Figma 실제 폰트 폭을 얻어 줄바꿈 없이 렌더
-    // ② DOM 중심점(center) 또는 DOM 오른쪽 끝(right)을 기준으로 x 재계산
-    if (style.textAlign === 'center' || style.textAlign === 'right') {
-      const t = makeText(0, rect.y, 0);
-      await applyBoldSegments(t);
-      if (style.textAlign === 'center') {
-        const domCenter = rect.x + rect.width / 2;
-        t.x = Math.round(domCenter - t.width / 2);
-      } else {
-        t.x = Math.round(rect.x + rect.width - t.width);
-      }
-      if (style.opacity < 1) t.opacity = style.opacity;
-    if (!visible) t.visible = false;
-      parent.appendChild(t);
-      textCount++;
-      return;
-    }
-
-    // left/start 정렬: DOM 위치 그대로
-    // block 요소에서 실제로 텍스트가 줄바꿈되는지 lineHeight로 판별
-    const isBlockDisplay = /^(block|flex|grid|list-item|table)/.test(style.display);
-    const lineH = parseFloat(style.lineHeight) || (style.fontSize * 1.4);
-    const textWraps = isBlockDisplay && h > lineH * 1.3;
-
-    if (textWraps) {
-      // 브라우저에서 텍스트가 줄바꿈됨 → 요소 폭을 고정폭으로 사용하여 줄바꿈 보존
-      const t = makeText(rect.x, rect.y, w);
-      await applyBoldSegments(t);
-      if (style.opacity < 1) t.opacity = style.opacity;
-    if (!visible) t.visible = false;
-      parent.appendChild(t);
-      textCount++;
-      return;
-    }
-
-    if (isSingleLine) {
-      // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 방지
-      const t = makeText(rect.x, rect.y, 0);
-      await applyBoldSegments(t);
-      if (style.opacity < 1) t.opacity = style.opacity;
-    if (!visible) t.visible = false;
-      parent.appendChild(t);
-      textCount++;
-      return;
-    }
-
-    const fixedW = isBlockDisplay ? calcFixedWidth(w) : 0;
-    const t = makeText(rect.x, rect.y, fixedW);
-    await applyBoldSegments(t);
+    const t = await createTextNode(node, rect.x, rect.y);
     if (style.opacity < 1) t.opacity = style.opacity;
     if (!visible) t.visible = false;
     parent.appendChild(t);

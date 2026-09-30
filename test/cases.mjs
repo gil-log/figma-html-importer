@@ -2,10 +2,12 @@
  * 케이스 표 — 한 행 = 브라우저 렌더링과 Figma 결과가 같아야 하는 조건 하나.
  * check(result, t): result.root = 생성된 루트 노드(JSON), result.roots = 전체 루트, result.done = 완료 메시지
  */
+import fs from 'node:fs';
 import { find, findText, findTextIncl, texts, solid, hasSolid, gradientHandles } from './helpers.mjs';
 
 const TW = '<script src="https://cdn.tailwindcss.com"></script>';
 const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const fixture = (name) => fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const frameBy = (root, pred) => find(root, (n) => n.type === 'FRAME' && pred(n));
 const solidFrame = (root, rgb) => frameBy(root, (n) => hasSolid(n, rgb));
 
@@ -117,7 +119,12 @@ export const cases = [
     title: 'text-transform:uppercase 는 대문자로 표시된다 (textCase UPPER)',
     width: 375,
     html: '<div><span style="text-transform:uppercase">upper me</span></div>',
-    check: ({ root }, t) => t.eq(findText(root, 'upper me')?.textCase, 'UPPER', 'textCase'),
+    check: ({ root }, t) => {
+      const n = findText(root, 'upper me');
+      // 노드 전체 구간에 range 로 건 값은 Figma 에서 노드 속성과 같다
+      const whole = n?.ranges?.some((r) => r.kind === 'textCase' && r.value === 'UPPER' && r.start === 0 && r.end === n.characters.length);
+      t.ok(n?.textCase === 'UPPER' || whole, `textCase ${n?.textCase} ranges ${JSON.stringify(n?.ranges)}`);
+    },
   },
   {
     id: 'hidden-inline-text',
@@ -135,8 +142,9 @@ export const cases = [
       const one = findTextIncl(root, 'Line one');
       const two = findTextIncl(root, 'Line two');
       t.ok(one && two, 'both lines exist');
-      if (one && two && one !== two) t.ok(two.ay > one.ay, 'second line below first');
-      if (one && one === two) t.ok(one.characters === 'Line one\nLine two', `chars ${JSON.stringify(one.characters)}`);
+      const same = one && two && one.characters === two.characters;
+      if (one && two && !same) t.ok(two.ay > one.ay, 'second line below first');
+      if (same) t.eq(one.characters, 'Line one\nLine two', 'merged lines');
     },
   },
 
@@ -577,6 +585,27 @@ export const cases = [
       const body = findText(root, 'bullet text');
       t.ok(b && hasSolid(b, [255, 0, 0]), 'red bullet');
       if (b && body) t.ok(b.ax < body.ax, 'bullet left of text');
+    },
+  },
+
+  // ── 실제 화면 ─────────────────────────────────────────────
+  {
+    id: 'fixture-mobile-home',
+    title: 'Tailwind 모바일 홈 화면이 배지·말줄임·가운데 문단·하단 바까지 브라우저와 같게 들어간다',
+    width: 375,
+    html: fixture('mobile-home.html'),
+    check: ({ root }, t) => {
+      t.eq(solid(root), [249, 250, 251], 'page background (bg-gray-50)');
+      t.ok(solidFrame(root, [220, 252, 231]) && findText(root, '사용 가능'), 'green badge');
+      t.eq(findText(root, '대회의실 A (12인 이상 대형)')?.textTruncation, 'ENDING', 'truncated title');
+      const para = findTextIncl(root, '추천 공간');
+      t.eq(para?.textAutoResize, 'HEIGHT', 'centered paragraph wraps');
+      t.eq(para?.textAlignHorizontal, 'CENTER', 'centered paragraph align');
+      t.ok(findText(root, '공간 이름을 입력하세요'), 'input placeholder');
+      t.ok(find(root, (n) => n.type === 'FRAME' && (n.fills || []).some((f) => f.type === 'GRADIENT_LINEAR')), 'hero gradient');
+      const nav = find(root, (n) => n.name === 'nav');
+      t.near(nav && nav.ay + nav.height, root.height, 1, 'bottom nav at the bottom');
+      t.eq(nav ? find(nav, (n) => n.type === 'TEXT' && n.characters === '예약') ? 1 : 0 : 0, 1, 'nav label');
     },
   },
 
