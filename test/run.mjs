@@ -94,11 +94,15 @@ let page = await freshPage();
 for (const c of selected) {
   const t = createT();
   let error;
+  let elapsed = 0;
   try {
     const steps = c.sequence || (c.html ? [c] : []);
     let res = { roots: [], selected: [] };
     for (const { html, width, theme, options, selectFrame, failText } of steps) {
+      const started = Date.now();
       res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame, failText });
+      res.elapsed = Date.now() - started;
+      elapsed += res.elapsed;
     }
     // 가져오기 뒤 UI 동작 (새로 띄우기·파일 끌어놓기 등)
     if (c.uiAction) res.ui = await page.evaluate(({ name, args }) => window[name](...args), c.uiAction);
@@ -112,7 +116,9 @@ for (const c of selected) {
   }
   const pass = !error && t.fails.length === 0;
   results.push({ id: c.id, title: c.title, pass, detail: error || t.fails.join(' / ') });
-  console.log(`${pass ? 'PASS' : 'FAIL'}  ${c.id.padEnd(28)} ${c.title}${pass ? '' : `\n      → ${error || t.fails.join(' / ')}`}`);
+  // 오래 걸린 케이스는 소요 시간을 함께 보여 준다
+  const slow = elapsed >= 3000 ? ` (${(elapsed / 1000).toFixed(1)}s)` : '';
+  console.log(`${pass ? 'PASS' : 'FAIL'}  ${c.id.padEnd(28)} ${c.title}${slow}${pass ? '' : `\n      → ${error || t.fails.join(' / ')}`}`);
 }
 
 await browser.close();

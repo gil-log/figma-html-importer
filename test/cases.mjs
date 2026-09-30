@@ -1389,4 +1389,14 @@ export const cases = [
     html: '<div><p style="font-variant:small-caps">Small Caps</p></div>',
     check: ({ root }, t) => t.eq(findText(root, 'Small Caps')?.textCase, 'SMALL_CAPS', 'textCase'),
   },
+  {
+    id: 'large-page-performance',
+    title: '노드 2천여 개 페이지도 제한 시간 안에 가져온다',
+    width: 375,
+    html: `<div>${Array.from({ length: 400 }, (_, i) => `<div style="display:flex;gap:8px;padding:4px;border-bottom:1px solid #eee"><span style="width:20px;height:20px;background:#ccc;border-radius:50%"></span><p style="margin:0">Row ${i} <b>bold</b> text</p><em>meta</em></div>`).join('')}</div>`,
+    check: ({ done, elapsed }, t) => {
+      t.eq(done?.failedCount, 0, 'no failures');
+      t.ok(elapsed < 20000, `elapsed ${elapsed}ms`);
+    },
+  },
 ];
