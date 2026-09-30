@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>figma-html-importer harness</title>
+</head>
+<body style="margin:0">
+<!-- 실제 플러그인 UI 와 같은 크기(400x580)로 빌드된 ui.html 을 띄운다 -->
+<iframe id="ui" src="/dist/ui.html" width="400" height="580" style="border:0"></iframe>
+<script src="/test/figma-mock.js"></script>
+<script src="/dist/code.js"></script>
+<script>
+  const ui = document.getElementById('ui');
+  let waiter = null;
+
+  // Figma 처럼 UI 가 보낸 pluginMessage 를 메인 스레드 onmessage 로 전달
+  window.addEventListener('message', (e) => {
+    if (e.source !== ui.contentWindow) return;
+    const m = e.data && e.data.pluginMessage;
+    if (!m || typeof figma.ui.onmessage !== 'function') return;
+    Promise.resolve(figma.ui.onmessage(m)).catch((err) => { if (waiter) waiter.reject(err); });
+  });
+
+  const origPost = figma.ui.postMessage.bind(figma.ui);
+  figma.ui.postMessage = (m) => {
+    origPost(m);
+    if (waiter && (m.type === 'import-done' || m.type === 'import-error')) waiter.resolve(m);
+  };
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.uiReady = async () => {
+    for (let i = 0; i < 100; i++) {
+      if (ui.contentDocument && ui.contentDocument.querySelector('textarea')) return true;
+      await sleep(50);
+    }
+    return false;
+  };
+
+  function setValue(win, el, value) {
+    const proto = el.tagName === 'TEXTAREA' ? win.HTMLTextAreaElement.prototype : win.HTMLSelectElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+    el.dispatchEvent(new win.Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+  }
+
+  function setChecked(win, id, value) {
+    const el = ui.contentDocument.getElementById(id);
+    if (!el) return false;
+    if (el.checked !== !!value) el.click();
+    return true;
+  }
+
+  /**
+   * @param c { html, width, theme, options: { autoLayout, intoSelection }, selectFrame }
+   * @returns { roots, done, error }
+   */
+  window.runCase = async function (c) {
+    const win = ui.contentWindow, doc = ui.contentDocument;
+    const theme = doc.documentElement.style;
+    theme.removeProperty('--figma-color-bg');
+    for (const [k, v] of Object.entries(c.theme || {})) theme.setProperty(k, v);
+
+    const page = figma.currentPage;
+    page.selection = [];
+    let target = null;
+    if (c.selectFrame) {
+      target = figma.createFrame();
+      target.name = 'selected';
+      target.resize(c.selectFrame.width, c.selectFrame.height);
+      page.appendChild(target);
+      page.selection = [target];
+    }
+    const before = new Set(page.children);
+
+    setValue(win, doc.querySelector('textarea'), c.html);
+    setValue(win, doc.querySelector('select'), String(c.width || 1440));
+    const opts = c.options || {};
+    setChecked(win, 'opt-autolayout', !!opts.autoLayout);
+    setChecked(win, 'opt-into-selection', !!opts.intoSelection);
+    await sleep(50);
+
+    const result = new Promise((resolve, reject) => { waiter = { resolve, reject }; });
+    let finished = false;
+    const errorWatch = (async () => {
+      for (let i = 0; i < 600; i++) {
+        await sleep(50);
+        if (finished) return new Promise(() => {});
+        const box = doc.querySelector('.error-box');
+        if (box) throw new Error('UI error: ' + box.textContent);
+        if (!doc.querySelector('textarea')) throw new Error('UI crashed: ' + doc.body.innerText.slice(0, 300));
+      }
+      throw new Error('timeout');
+    })();
+    doc.querySelector('.import-btn').click();
+    let done;
+    try {
+      done = await Promise.race([result, errorWatch]);
+    } finally {
+      finished = true;
+      waiter = null;
+    }
+    const created = page.children.filter((n) => !before.has(n));
+    const roots = target ? target.children : created;
+    return { roots: roots.map(__serializeNode), done };
+  };
+</script>
+</body>
+</html>

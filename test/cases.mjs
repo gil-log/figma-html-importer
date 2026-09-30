@@ -1,0 +1,573 @@
+/**
+ * 케이스 표 — 한 행 = 브라우저 렌더링과 Figma 결과가 같아야 하는 조건 하나.
+ * check(result, t): result.root = 생성된 루트 노드(JSON), result.roots = 전체 루트, result.done = 완료 메시지
+ */
+import { find, findText, findTextIncl, texts, solid, hasSolid, gradientHandles } from './helpers.mjs';
+
+const TW = '<script src="https://cdn.tailwindcss.com"></script>';
+const frameBy = (root, pred) => find(root, (n) => n.type === 'FRAME' && pred(n));
+const solidFrame = (root, rgb) => frameBy(root, (n) => hasSolid(n, rgb));
+
+export const cases = [
+  // ── 폰트 굵기 ──────────────────────────────────────────────
+  {
+    id: 'font-weight-400',
+    title: '굵기 400 텍스트는 Regular, 300·600·700 은 각각 Light·Semi Bold·Bold 로 들어간다',
+    width: 375,
+    html: '<div><p style="font-weight:400">w400</p><p style="font-weight:300">w300</p><p style="font-weight:600">w600</p><p style="font-weight:700">w700</p></div>',
+    check: ({ root }, t) => {
+      t.eq(findText(root, 'w400')?.fontName?.style, 'Regular', 'w400');
+      t.eq(findText(root, 'w300')?.fontName?.style, 'Light', 'w300');
+      t.eq(findText(root, 'w600')?.fontName?.style, 'Semi Bold', 'w600');
+      t.eq(findText(root, 'w700')?.fontName?.style, 'Bold', 'w700');
+    },
+  },
+  {
+    id: 'font-italic-400',
+    title: '굵기 400 이탤릭은 Italic 스타일로 들어간다',
+    width: 375,
+    html: '<div><em style="display:block">italic</em></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'italic')?.fontName?.style, 'Italic', 'style'),
+  },
+
+  // ── 그림자 ────────────────────────────────────────────────
+  {
+    id: 'shadow-single',
+    title: 'box-shadow 는 같은 오프셋·blur·색의 드롭 섀도로 들어간다',
+    width: 375,
+    html: '<div style="padding:20px"><div style="width:80px;height:40px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.2)"></div></div>',
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 80 && n.height === 40);
+      const e = f?.effects?.[0];
+      t.eq(e?.type, 'DROP_SHADOW', 'type');
+      t.near(e?.offset?.y, 4, 0.01, 'offset.y');
+      t.near(e?.radius, 16, 0.01, 'radius');
+      t.near(e?.color?.a, 0.2, 0.01, 'alpha');
+    },
+  },
+  {
+    id: 'shadow-multi-inset',
+    title: '여러 겹 그림자와 inset 그림자가 모두 들어간다',
+    width: 375,
+    html: '<div style="padding:20px"><div style="width:80px;height:40px;background:#fff;box-shadow:inset 0 0 0 1px red, 0 2px 4px rgba(0,0,0,.3)"></div></div>',
+    check: ({ root }, t) => {
+      const types = (frameBy(root, (n) => n.width === 80)?.effects || []).map((e) => e.type).sort();
+      t.eq(types, ['DROP_SHADOW', 'INNER_SHADOW'], 'effect types');
+    },
+  },
+  {
+    id: 'shadow-tailwind',
+    title: 'Tailwind shadow-lg 는 투명 링을 빼고 2겹 드롭 섀도로 들어간다',
+    width: 375,
+    html: `${TW}<div class="p-6"><div class="h-10 w-40 bg-white shadow-lg rounded-xl"></div></div>`,
+    check: ({ root }, t) => {
+      const effects = frameBy(root, (n) => n.width === 160)?.effects || [];
+      t.eq(effects.map((e) => e.type), ['DROP_SHADOW', 'DROP_SHADOW'], 'types');
+      t.eq(effects.map((e) => e.offset.y).sort((a, b) => a - b), [4, 10], 'offsets');
+    },
+  },
+
+  // ── 투명도 ────────────────────────────────────────────────
+  {
+    id: 'opacity-zero',
+    title: 'opacity:0 요소는 투명도 0 으로 들어간다',
+    width: 375,
+    html: '<div><div style="opacity:0;width:50px;height:20px;background:red"></div><p>x</p></div>',
+    check: ({ root }, t) => t.eq(solidFrame(root, [255, 0, 0])?.opacity, 0, 'opacity'),
+  },
+  {
+    id: 'opacity-text',
+    title: '텍스트에도 opacity 가 적용된다',
+    width: 375,
+    html: '<div><p style="opacity:.5">half</p></div>',
+    check: ({ root }, t) => t.near(findText(root, 'half')?.opacity, 0.5, 0.001, 'opacity'),
+  },
+
+  // ── 텍스트 내용 ───────────────────────────────────────────
+  {
+    id: 'whitespace-collapse',
+    title: 'HTML 소스의 줄바꿈·들여쓰기·연속 공백은 한 칸으로 합쳐진다',
+    width: 375,
+    html: '<div style="width:300px"><p>\n    Hello\n    world   again\n  </p></div>',
+    check: ({ root }, t) => t.ok(findText(root, 'Hello world again'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
+  },
+  {
+    id: 'whitespace-pre',
+    title: 'pre 안의 줄바꿈과 들여쓰기는 유지된다',
+    width: 375,
+    html: '<div><pre style="margin:0">line1\n  line2</pre></div>',
+    check: ({ root }, t) => t.ok(findText(root, 'line1\n  line2'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
+  },
+  {
+    id: 'text-transform',
+    title: 'text-transform:uppercase 는 대문자로 표시된다 (textCase UPPER)',
+    width: 375,
+    html: '<div><span style="text-transform:uppercase">upper me</span></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'upper me')?.textCase, 'UPPER', 'textCase'),
+  },
+  {
+    id: 'hidden-inline-text',
+    title: 'display:none 인 인라인 자식의 글자는 포함되지 않는다',
+    width: 375,
+    html: '<div style="width:300px"><p>Visible<span style="display:none"> hidden</span></p></div>',
+    check: ({ root }, t) => t.ok(findText(root, 'Visible'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
+  },
+  {
+    id: 'br-lines',
+    title: '<br> 로 나눈 줄은 위아래로 유지된다',
+    width: 375,
+    html: '<div style="width:300px"><p>Line one<br>Line two</p></div>',
+    check: ({ root }, t) => {
+      const one = findTextIncl(root, 'Line one');
+      const two = findTextIncl(root, 'Line two');
+      t.ok(one && two, 'both lines exist');
+      if (one && two && one !== two) t.ok(two.ay > one.ay, 'second line below first');
+      if (one && one === two) t.ok(one.characters === 'Line one\nLine two', `chars ${JSON.stringify(one.characters)}`);
+    },
+  },
+
+  // ── 텍스트 위치·줄바꿈 ─────────────────────────────────────
+  {
+    id: 'center-wrap',
+    title: '가운데 정렬 문단이 브라우저에서 여러 줄이면 같은 폭으로 줄바꿈된다',
+    width: 1440,
+    html: '<div style="width:200px"><p style="text-align:center;font-size:16px;line-height:24px">This is a centered paragraph that wraps onto several lines</p></div>',
+    check: ({ root }, t) => {
+      const n = findTextIncl(root, 'centered paragraph');
+      t.eq(n?.textAutoResize, 'HEIGHT', 'autoResize');
+      t.near(n?.width, 200, 1, 'width');
+      t.eq(n?.textAlignHorizontal, 'CENTER', 'align');
+    },
+  },
+  {
+    id: 'padding-text',
+    title: '배경 없는 요소의 padding 안쪽에 텍스트가 놓인다',
+    width: 375,
+    html: '<ul style="margin:0;padding:0;list-style:none;width:300px"><li style="padding:12px 16px;font-size:14px;line-height:20px">Item one</li></ul>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Item one');
+      t.near(n?.ax, 16, 1, 'x');
+      t.near(n && n.ay + n.height / 2, 22, 2, 'center y');
+    },
+  },
+  {
+    id: 'flex-center-text',
+    title: 'flex items-center 로 세로 가운데 정렬된 텍스트는 가운데에 놓인다',
+    width: 375,
+    html: '<div style="width:300px"><div style="display:flex;align-items:center;height:48px;padding-left:16px;font-size:14px;line-height:20px">Item two</div></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Item two');
+      t.near(n?.ax, 16, 1, 'x');
+      t.near(n && n.ay + n.height / 2, 24, 2, 'center y');
+    },
+  },
+  {
+    id: 'align-end',
+    title: 'text-align:end 는 오른쪽 끝에 붙는다',
+    width: 375,
+    html: '<div style="width:200px"><div style="text-align:end">Right</div></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Right');
+      t.near(n && n.ax + n.width, 200, 1.5, 'right edge');
+    },
+  },
+  {
+    id: 'align-right-bg',
+    title: '배경 있는 박스 안의 오른쪽 정렬 텍스트는 오른쪽 padding 안쪽에 붙는다',
+    width: 375,
+    html: '<div style="width:200px"><div style="text-align:right;background:#eee;padding:4px">Right in box</div></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Right in box');
+      t.near(n && n.ax + n.width, 196, 1.5, 'right edge');
+    },
+  },
+  {
+    id: 'truncate',
+    title: 'truncate(말줄임) 텍스트는 칸 폭에서 말줄임된다',
+    width: 375,
+    html: '<div style="width:120px"><p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0">A very long product title that should be truncated</p></div>',
+    check: ({ root }, t) => {
+      const n = findTextIncl(root, 'A very long');
+      t.eq(n?.textTruncation, 'ENDING', 'textTruncation');
+      t.eq(n?.maxLines, 1, 'maxLines');
+      t.near(n?.width, 120, 1, 'width');
+    },
+  },
+  {
+    id: 'wrap-block-text',
+    title: '줄바꿈되는 블록 문단은 요소 폭으로 줄바꿈된다 (기존 동작 유지)',
+    width: 375,
+    html: '<div style="width:200px"><p style="margin:0;font-size:14px;line-height:20px">A long paragraph of text that certainly wraps across several lines here</p></div>',
+    check: ({ root }, t) => {
+      const n = findTextIncl(root, 'A long paragraph');
+      t.eq(n?.textAutoResize, 'HEIGHT', 'autoResize');
+      t.near(n?.width, 200, 1, 'width');
+    },
+  },
+  {
+    id: 'short-text-single-line',
+    title: '넓은 블록 안의 짧은 한 줄 텍스트는 줄바꿈 없는 자동 폭이다 (기존 동작 유지)',
+    width: 375,
+    html: '<div style="width:300px"><p style="margin:0">방문일</p></div>',
+    check: ({ root }, t) => t.eq(findText(root, '방문일')?.textAutoResize, 'WIDTH_AND_HEIGHT', 'autoResize'),
+  },
+  {
+    id: 'text-decoration',
+    title: 'text-decoration:underline 은 밑줄로 들어간다 (기존 동작 유지)',
+    width: 375,
+    html: '<div><a href="#" style="display:block;text-decoration:underline">link</a></div>',
+    check: ({ root }, t) => t.eq(findText(root, 'link')?.textDecoration, 'UNDERLINE', 'decoration'),
+  },
+
+  // ── 단일 요소 ─────────────────────────────────────────────
+  {
+    id: 'root-text',
+    title: '요소 하나만 붙여넣어도 그 안의 텍스트가 들어간다',
+    width: 375,
+    html: '<button style="padding:8px 16px;background:#333;color:#fff;border:0;border-radius:6px">Submit</button>',
+    check: ({ root }, t) => t.ok(findText(root, 'Submit'), 'text Submit exists'),
+  },
+  {
+    id: 'root-svg',
+    title: 'SVG 하나만 붙여넣어도 벡터가 들어간다',
+    width: 375,
+    html: '<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="red"/></svg>',
+    check: ({ root }, t) => t.ok(find(root, (n) => (n.svg || '').includes('<circle')), 'svg node exists'),
+  },
+
+  // ── 렌더링 환경 ───────────────────────────────────────────
+  {
+    id: 'script-dom',
+    title: 'DOM 을 수정하는 스크립트가 있어도 플러그인이 멈추지 않고 결과가 반영된다',
+    width: 375,
+    html: '<div><p id="js">static</p></div><script>document.getElementById("js").textContent = "from script";</script>',
+    check: ({ root }, t) => t.ok(findText(root, 'from script'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
+  },
+  {
+    id: 'media-query',
+    title: '미디어쿼리·vw·vh 는 선택한 렌더 폭(1440×900) 기준으로 계산된다',
+    width: 1440,
+    html: '<style>.box{background:blue;height:20px}@media (min-width:768px){.box{background:red}}</style><div><div class="box"></div><div style="width:100vw;height:10px;background:#0f0"></div><div style="height:100vh;width:10px;background:#00f"></div></div>',
+    check: ({ root }, t) => {
+      t.ok(solidFrame(root, [255, 0, 0]), 'media query applied (red box)');
+      t.near(solidFrame(root, [0, 255, 0])?.width, 1440, 0.5, '100vw');
+      t.near(frameBy(root, (n) => n.width === 10)?.height, 900, 0.5, '100vh');
+    },
+  },
+  {
+    id: 'tailwind-md',
+    title: 'Tailwind md: 클래스가 1440 렌더 폭에서 적용된다',
+    width: 1440,
+    html: `${TW}<div class="p-4"><div class="h-6 w-40 bg-gray-300 md:bg-green-500"></div></div>`,
+    check: ({ root }, t) => t.ok(solidFrame(root, [34, 197, 94]), 'green-500 frame'),
+  },
+  {
+    id: 'tailwind-apply-head',
+    title: '<head> 의 <style type="text/tailwindcss"> @apply 가 적용된다',
+    width: 375,
+    html: `<!DOCTYPE html><html><head>${TW}<style type="text/tailwindcss">.btn2 { @apply bg-red-500 text-white px-4 py-2; }</style></head><body><div class="p-4"><button class="btn2">Apply</button></div></body></html>`,
+    check: ({ root }, t) => t.ok(solidFrame(root, [239, 68, 68]), 'red-500 button frame'),
+  },
+  {
+    id: 'tailwind-config-isolation',
+    title: '이전 가져오기의 tailwind.config 가 다음 가져오기에 남지 않는다',
+    sequence: [
+      { width: 375, html: `${TW}<script>tailwind.config={theme:{extend:{colors:{brand:'#ff0000'}}}}</script><div class="p-2"><div class="h-6 w-40 bg-brand"></div></div>` },
+      { width: 375, html: `${TW}<div class="p-2"><div class="h-6 w-40 bg-brand"></div></div>` },
+    ],
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 160);
+      t.ok(f, 'frame exists');
+      t.eq(solid(f), null, 'no brand color');
+    },
+  },
+  {
+    id: 'body-class-bg',
+    title: '<body class="bg-..."> 배경이 결과에 반영된다',
+    width: 375,
+    html: `<!DOCTYPE html><html><head>${TW}</head><body class="bg-gray-100"><div class="p-6"><div class="bg-white h-10 w-40"></div></div></body></html>`,
+    check: ({ root }, t) => t.eq(solid(root), [243, 244, 246], 'root fill'),
+  },
+  {
+    id: 'body-bg-style',
+    title: '<style> 의 body 배경이 결과에 반영된다 (기존 동작 유지)',
+    width: 375,
+    html: '<style>body{background:#f0f0f0}</style><div style="padding:10px"><p>content</p></div>',
+    check: ({ root }, t) => t.eq(solid(root), [240, 240, 240], 'root fill'),
+  },
+  {
+    id: 'dark-theme-bg',
+    title: 'Figma 다크 모드여도 배경 없는 HTML 은 흰 배경으로 들어간다',
+    width: 375,
+    theme: { '--figma-color-bg': '#2c2c2c' },
+    html: '<div><p>transparent fragment</p></div>',
+    check: ({ root }, t) => t.eq(solid(root), [255, 255, 255], 'root fill'),
+  },
+  {
+    id: 'fixed-bottom-bar',
+    title: 'position:fixed 하단 바는 결과 맨 아래에 붙는다 (기존 동작 유지)',
+    width: 375,
+    html: '<div style="height:300px">content</div><nav style="position:fixed;bottom:0;left:0;right:0;height:50px;background:#333"></nav>',
+    check: ({ root }, t) => {
+      const nav = solidFrame(root, [51, 51, 51]);
+      t.near(nav?.width, 375, 0.5, 'width');
+      t.near(nav && nav.ay + nav.height, root.height, 1, 'bottom edge');
+    },
+  },
+
+  // ── 그라디언트 ────────────────────────────────────────────
+  {
+    id: 'gradient-vertical',
+    title: '방향 없는 linear-gradient 는 위→아래로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:100px;background:linear-gradient(red, blue)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 100)?.fills?.find((f) => f.type === 'GRADIENT_LINEAR');
+      if (!t.ok(g, 'gradient fill')) return;
+      const h = gradientHandles(g);
+      t.near(h.start[0], 0.5, 0.01, 'start.x'); t.near(h.start[1], 0, 0.01, 'start.y');
+      t.near(h.end[0], 0.5, 0.01, 'end.x'); t.near(h.end[1], 1, 0.01, 'end.y');
+    },
+  },
+  {
+    id: 'gradient-diagonal-aspect',
+    title: '비정사각형의 135deg 그라디언트는 CSS 와 같은 시작·끝 위치로 들어간다',
+    width: 375,
+    html: '<div><div style="width:200px;height:100px;background:linear-gradient(135deg, red, blue)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 200)?.fills?.find((f) => f.type === 'GRADIENT_LINEAR');
+      if (!t.ok(g, 'gradient fill')) return;
+      const h = gradientHandles(g);
+      t.near(h.start[0], 0.125, 0.01, 'start.x'); t.near(h.start[1], -0.25, 0.01, 'start.y');
+      t.near(h.end[0], 0.875, 0.01, 'end.x'); t.near(h.end[1], 1.25, 0.01, 'end.y');
+    },
+  },
+  {
+    id: 'gradient-horizontal',
+    title: 'to right 그라디언트는 왼쪽→오른쪽으로 들어간다 (기존 동작 유지)',
+    width: 375,
+    html: '<div><div style="width:100px;height:40px;background:linear-gradient(to right, red, blue)"></div></div>',
+    check: ({ root }, t) => {
+      const g = frameBy(root, (n) => n.width === 100)?.fills?.find((f) => f.type === 'GRADIENT_LINEAR');
+      if (!t.ok(g, 'gradient fill')) return;
+      const h = gradientHandles(g);
+      t.near(h.start[0], 0, 0.01, 'start.x'); t.near(h.end[0], 1, 0.01, 'end.x');
+      t.near(h.start[1], h.end[1], 0.01, 'horizontal');
+    },
+  },
+  {
+    id: 'bg-clip-text',
+    title: 'background-clip:text 그라디언트는 프레임 배경이 되지 않는다 (기존 동작 유지)',
+    width: 375,
+    html: '<div><h1 style="background:linear-gradient(90deg,red,blue);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-block">Gradient</h1></div>',
+    check: ({ root }, t) => t.ok(!find(root, (n) => n.type === 'FRAME' && (n.fills || []).some((f) => f.type.startsWith('GRADIENT'))), 'no gradient frame'),
+  },
+
+  // ── 박스·레이아웃 ─────────────────────────────────────────
+  {
+    id: 'overflow-scroll',
+    title: '가로 스크롤 영역은 원래 폭을 유지하고 넘치는 내용은 잘린다',
+    width: 375,
+    html: '<div style="padding:8px"><div style="width:200px;overflow-x:auto;display:flex;gap:8px;background:#eee"><div style="flex:none;width:150px;height:40px;background:#ccc"></div><div style="flex:none;width:150px;height:40px;background:#ccc"></div><div style="flex:none;width:150px;height:40px;background:#ccc"></div></div></div>',
+    check: ({ root }, t) => {
+      const f = solidFrame(root, [238, 238, 238]);
+      t.near(f?.width, 200, 0.5, 'width');
+      t.eq(f?.clipsContent, true, 'clipsContent');
+    },
+  },
+  {
+    id: 'abs-overflow-bg',
+    title: '밖으로 튀어나온 절대위치 자식 때문에 부모 배경이 커지지 않는다',
+    width: 375,
+    html: '<style>.dot{position:relative;width:40px;height:40px;background:#ccc}.dot::after{content:"";position:absolute;right:-4px;top:-4px;width:8px;height:8px;background:red;border-radius:50%}</style><div style="padding:10px"><div class="dot"></div></div>',
+    check: ({ root }, t) => {
+      t.near(solidFrame(root, [204, 204, 204])?.width, 40, 0.5, 'width');
+      const dot = solidFrame(root, [255, 0, 0]);
+      t.near(dot?.x, 36, 0.5, 'badge x');
+    },
+  },
+  {
+    id: 'zero-size-wrapper',
+    title: '크기가 0 인 래퍼 안의 요소도 들어간다',
+    width: 375,
+    html: '<div style="position:relative;width:100px;height:100px;background:#eee"><div style="position:absolute;top:0;right:0"><div style="position:absolute;right:0;width:20px;height:20px;background:red"></div></div></div>',
+    check: ({ root }, t) => {
+      const red = solidFrame(root, [255, 0, 0]);
+      t.near(red?.width, 20, 0.5, 'width');
+      t.near(red?.ax, 80, 0.5, 'x');
+    },
+  },
+  {
+    id: 'display-contents',
+    title: 'display:contents 요소의 자식이 들어간다',
+    width: 375,
+    html: '<div style="width:200px"><div style="display:contents"><p style="margin:0">inside contents</p></div><p style="margin:0">sibling</p></div>',
+    check: ({ root }, t) => t.ok(findText(root, 'inside contents'), 'text exists'),
+  },
+  {
+    id: 'hairline',
+    title: '0.5px 구분선이 들어간다',
+    width: 375,
+    html: '<div style="width:200px"><div style="height:0.5px;background:#000"></div><p style="margin:0">x</p></div>',
+    check: ({ root }, t) => t.near(solidFrame(root, [0, 0, 0])?.height, 0.5, 0.01, 'height'),
+  },
+  {
+    id: 'radius-percent',
+    title: '퍼센트 모서리 반경은 요소 크기 기준으로 계산된다',
+    width: 375,
+    html: '<div><div style="width:200px;height:200px;border-radius:10%;background:#ccc"></div></div>',
+    check: ({ root }, t) => t.near(solidFrame(root, [204, 204, 204])?.cornerRadius, 20, 0.5, 'radius'),
+  },
+  {
+    id: 'dashed',
+    title: 'dashed 테두리는 점선으로 들어간다',
+    width: 375,
+    html: '<div><div style="width:100px;height:40px;border:2px dashed #999"></div></div>',
+    check: ({ root }, t) => t.ok((frameBy(root, (n) => n.width === 100)?.dashPattern || []).length >= 2, 'dashPattern'),
+  },
+  {
+    id: 'rotate',
+    title: '회전된 요소는 원래 크기에 회전값을 가진 채로 들어간다',
+    width: 375,
+    html: '<div style="padding:40px"><div style="width:100px;height:20px;background:red;transform:rotate(45deg)"></div></div>',
+    check: ({ root }, t) => {
+      const f = solidFrame(root, [255, 0, 0]);
+      t.near(f?.width, 100, 0.5, 'width');
+      t.near(f?.height, 20, 0.5, 'height');
+      const m = f?.relativeTransform;
+      t.near(m?.[0]?.[0], Math.SQRT1_2, 0.001, 'cos');
+      t.near(m?.[1]?.[0], Math.SQRT1_2, 0.001, 'sin');
+    },
+  },
+
+  // ── 인라인 콘텐츠 ─────────────────────────────────────────
+  {
+    id: 'inline-block-span',
+    title: 'display:block span 은 앞 글자와 다른 줄로 들어간다',
+    width: 375,
+    html: '<div style="width:300px"><div>Title <span style="display:block;color:gray">Subtitle below</span></div></div>',
+    check: ({ root }, t) => {
+      const a = findText(root, 'Title');
+      const b = findText(root, 'Subtitle below');
+      t.ok(a && b, `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`);
+      if (a && b) t.ok(b.ay > a.ay, 'subtitle below');
+    },
+  },
+  {
+    id: 'inline-badge',
+    title: '배경·패딩이 있는 인라인 배지는 박스와 함께 들어간다',
+    width: 375,
+    html: '<div style="width:300px"><p>Status: <span style="background:#dfd;padding:2px 6px;border-radius:4px">Active</span></p></div>',
+    check: ({ root }, t) => {
+      const badge = solidFrame(root, [221, 255, 221]);
+      t.ok(badge, 'badge frame');
+      t.ok(findText(root, 'Active'), 'badge text');
+      t.ok(findTextIncl(root, 'Status:'), 'label text');
+    },
+  },
+  {
+    id: 'inline-icon',
+    title: '문장 안의 인라인 SVG 아이콘이 들어간다',
+    width: 375,
+    html: '<div style="width:300px"><p>Go <a href="#"><svg width="12" height="12"><rect width="12" height="12" fill="red"/></svg> next</a></p></div>',
+    check: ({ root }, t) => {
+      t.ok(find(root, (n) => (n.svg || '').includes('<rect')), 'svg node');
+      t.ok(findTextIncl(root, 'next'), 'text next');
+    },
+  },
+  {
+    id: 'inline-styles',
+    title: '인라인 요소의 글자 크기·이탤릭·밑줄이 해당 구간에 적용된다',
+    width: 375,
+    html: '<div style="width:300px"><p>Price <span style="font-size:28px">$20</span> <em>only</em> <u>today</u></p></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Price $20 only today');
+      if (!t.ok(n, `texts: ${JSON.stringify(texts(root).map((x) => x.characters))}`)) return;
+      const has = (kind, start, end, pred) => n.ranges.some((r) => r.kind === kind && r.start === start && r.end === end && pred(r.value));
+      t.ok(has('fontSize', 6, 9, (v) => v === 28), 'fontSize range on $20');
+      t.ok(has('fontName', 10, 14, (v) => v.endsWith('Italic')), 'italic range on only');
+      t.ok(has('textDecoration', 15, 20, (v) => v === 'UNDERLINE'), 'underline range on today');
+    },
+  },
+  {
+    id: 'inline-color-segment',
+    title: '인라인 요소의 다른 글자색이 해당 구간에 적용된다 (기존 동작 유지)',
+    width: 375,
+    html: '<div style="width:300px"><p>Hello <span style="color:red">red</span> world</p></div>',
+    check: ({ root }, t) => {
+      const n = findText(root, 'Hello red world');
+      if (!t.ok(n, 'merged text')) return;
+      const r = n.ranges.find((x) => x.kind === 'fills' && x.start === 6 && x.end === 9);
+      t.ok(r && Math.round(r.value[0].color.r * 255) === 255, 'red range');
+    },
+  },
+  {
+    id: 'list-marker',
+    title: '목록 기호(•)가 항목 왼쪽에 들어간다',
+    width: 375,
+    html: '<ul style="list-style:disc;padding-left:20px;width:200px;margin:0"><li>One</li><li>Two</li></ul>',
+    check: ({ root }, t) => {
+      const bullets = texts(root).filter((n) => n.characters.trim() === '•');
+      t.eq(bullets.length, 2, 'bullet count');
+      const one = findText(root, 'One');
+      if (bullets[0] && one) t.ok(bullets[0].ax < one.ax, 'bullet left of text');
+    },
+  },
+  {
+    id: 'pseudo-inline-text',
+    title: '인라인 ::before 텍스트가 본문 왼쪽에 들어간다',
+    width: 375,
+    html: '<style>.bul::before{content:"•";margin-right:4px;color:red}</style><div style="width:300px"><p class="bul" style="margin:0">bullet text</p></div>',
+    check: ({ root }, t) => {
+      const b = texts(root).find((n) => n.characters === '•');
+      const body = findText(root, 'bullet text');
+      t.ok(b && hasSolid(b, [255, 0, 0]), 'red bullet');
+      if (b && body) t.ok(b.ax < body.ax, 'bullet left of text');
+    },
+  },
+
+  // ── 폼 ───────────────────────────────────────────────────
+  {
+    id: 'form-checkbox',
+    title: '체크박스는 "on" 글자로 표시되지 않는다',
+    width: 375,
+    html: '<div style="width:300px"><label><input type="checkbox"> Remember</label></div>',
+    check: ({ root }, t) => {
+      t.ok(!findText(root, 'on'), 'no "on" text');
+      t.ok(findTextIncl(root, 'Remember'), 'label text');
+    },
+  },
+  {
+    id: 'form-select',
+    title: 'select 는 선택된 옵션의 라벨을 표시한다',
+    width: 375,
+    html: '<div style="width:300px"><select><option value="kr">대한민국</option></select></div>',
+    check: ({ root }, t) => t.ok(findText(root, '대한민국'), `texts: ${JSON.stringify(texts(root).map((n) => n.characters))}`),
+  },
+  {
+    id: 'form-password',
+    title: '비밀번호 입력값은 가려서 표시된다',
+    width: 375,
+    html: '<div style="width:300px"><input type="password" value="secret12"></div>',
+    check: ({ root }, t) => {
+      t.ok(!findText(root, 'secret12'), 'no plain password');
+      t.ok(findText(root, '••••••••'), 'masked');
+    },
+  },
+
+  // ── SVG ──────────────────────────────────────────────────
+  {
+    id: 'svg-css-fill',
+    title: 'CSS 로 색을 지정한 SVG 는 그 색으로 들어간다',
+    width: 375,
+    html: '<style>.ic path{fill:red}</style><div><svg class="ic" width="20" height="20" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg></div>',
+    check: ({ root }, t) => t.ok(find(root, (n) => /fill="rgb\(255, 0, 0\)"/.test(n.svg || '')), 'fill inlined'),
+  },
+  {
+    id: 'svg-no-viewbox',
+    title: 'viewBox 없는 SVG 를 CSS 로 키워도 내용이 같이 커진다',
+    width: 375,
+    html: '<div><svg width="20" height="20" style="width:40px;height:40px"><rect width="20" height="20" fill="blue"/></svg></div>',
+    check: ({ root }, t) => t.ok(find(root, (n) => (n.svg || '').includes('viewBox="0 0 20 20"')), 'viewBox added'),
+  },
+];

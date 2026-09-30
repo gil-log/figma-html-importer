@@ -96,6 +96,25 @@ npm run build
 
 The build outputs `dist/code.js` (Figma sandbox) and `dist/ui.html` (plugin UI).
 
+### Regression tests
+
+```bash
+# Build, then run every case in test/cases.mjs
+npm test
+
+# Run a subset, or run the cases against another build output
+node test/run.mjs --grep shadow
+node test/run.mjs --dist path/to/other/dist
+```
+
+The runner loads the built `dist/ui.html` in a 400×580 frame (the real plugin size) and executes
+`dist/code.js` on top of a Figma API mock (`test/figma-mock.js`). The mock rejects the same calls the
+real sandbox rejects — editing text with an unloaded font, resizing below 0.01, unsupported image
+formats, invalid SVG — so runtime errors surface in the test run. Each case in `test/cases.mjs`
+imports a small HTML snippet and asserts on the resulting node tree with numbers (positions, sizes,
+fills, effects, font styles). It uses the installed Google Chrome, or a Playwright Chromium if Chrome
+is missing (`npx playwright install chromium`).
+
 ## Feedback and Support
 
 If you have questions, run into issues, or want to suggest improvements, please reach out via email
