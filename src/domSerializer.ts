@@ -953,6 +953,35 @@ function extractRotation(el: Element, cs: CSSStyleDeclaration): DomNodeData['tra
   return { a: r2(a), b: r2(b), c: r2(c), d: r2(d), e: round2(e), f: round2(f), ox: round2(ox), oy: round2(oy) };
 }
 
+// ─── 레이어 이름 ──────────────────────────────────────────────
+
+// Tailwind 등 유틸리티 클래스는 레이어 이름으로 의미가 없다
+const UTILITY_CLASS = new RegExp(
+  '^(-?(m|p)[trblxyse]?|w|h|size|min-w|min-h|max-w|max-h|gap|space-[xy]|inset|top|right|bottom|left|z|order|' +
+  'col|row|basis|grow|shrink|text|font|leading|tracking|bg|from|via|to|border|rounded|ring|shadow|outline|' +
+  'opacity|blur|backdrop|fill|stroke|items|justify|content|self|place|object|overflow|translate|rotate|scale|' +
+  'skew|origin|transition|duration|ease|delay|animate|cursor|select|pointer-events|decoration|underline-offset|' +
+  'line-clamp|columns|aspect|divide|accent|caret|flex|grid|display)(-|$)|^(flex|grid|block|inline|inline-block|' +
+  'inline-flex|hidden|contents|absolute|relative|fixed|sticky|static|container|truncate|uppercase|lowercase|' +
+  'capitalize|italic|underline|sr-only|visible|invisible|grow|shrink|mx-auto|group|peer)$|[:\\[\\]/!]',
+);
+
+/** data-name → id → aria-label → img alt → 버튼·링크 글자 → 의미 있는 클래스 순으로 레이어 이름을 정한다 */
+function layerName(el: Element, tag: string): string | undefined {
+  const explicit = el.getAttribute('data-name') || el.getAttribute('data-figma-name');
+  if (explicit) return explicit.trim();
+  if (el.id) return `${tag}#${el.id}`;
+  const label = el.getAttribute('aria-label');
+  if (label) return `${tag} · ${label.trim()}`;
+  if (tag === 'img' && el.getAttribute('alt')) return `img · ${el.getAttribute('alt')!.trim()}`;
+  if (tag === 'button' || tag === 'a') {
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (text) return `${tag} · ${text.length > 24 ? text.slice(0, 24) + '…' : text}`;
+  }
+  const cls = Array.from(el.classList).find((c) => c.length >= 3 && /[a-z]/i.test(c) && !UTILITY_CLASS.test(c));
+  return cls ? `${tag}.${cls}` : undefined;
+}
+
 /**
  * 형제 레이어를 CSS 그리기 순서로 정렬 (뒤에 올수록 위에 그려진다).
  * 음수 z-index → 일반 흐름 요소·글자 → z-index auto/0 인 positioned 요소 → 양수 z-index, 같은 층은 DOM 순서.
@@ -1008,6 +1037,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   if (tag === 'svg') {
     return {
       tagName: 'svg',
+      name: layerName(el, tag),
       svgHtml: serializeSvg(el as SVGElement, cs),
       rect: relRect,
       visible: true,
@@ -1019,6 +1049,8 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
 
   const node: DomNodeData = { tagName: tag, rect: relRect, visible: true, style: extractStyle(cs), children: [] };
   if (transform) node.transform = transform;
+  const name = layerName(el, tag);
+  if (name) node.name = name;
   applyRadii(node.style, cs, rect.width, rect.height);
 
   if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);

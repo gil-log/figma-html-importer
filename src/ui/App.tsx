@@ -84,7 +84,7 @@ export default function App() {
       const images = await loadImages(collectImageUrls(domData));
 
       setStatus('building');
-      parent.postMessage({pluginMessage: {type: 'import-dom', data: domData, images}}, '*');
+      parent.postMessage({pluginMessage: {type: 'import-dom', data: domData, images, title: doc.title}}, '*');
     } catch (e: any) {
       setStatus('error');
       setError(e.message ?? String(e));

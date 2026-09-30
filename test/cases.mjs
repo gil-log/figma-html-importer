@@ -304,6 +304,24 @@ export const cases = [
     },
   },
 
+  // ── 레이어 이름 ───────────────────────────────────────────
+  {
+    id: 'layer-names',
+    title: '레이어 이름은 data-name·id·aria-label·alt·버튼 글자·의미 있는 클래스에서 정해지고 유틸리티 클래스는 쓰지 않는다',
+    width: 375,
+    html: `<div><section data-name="Hero Card" style="height:10px"></section><div id="main-nav" style="height:10px"></div><button aria-label="Close" style="width:10px;height:10px"></button><div class="product-card" style="height:10px"></div><div class="flex items-center p-4 md:p-6" style="height:10px"></div><img alt="Profile" src="${PNG_1PX}" style="width:10px;height:10px;display:block"><button style="background:#333;color:#fff">Submit</button></div>`,
+    check: ({ root }, t) => {
+      t.eq(root.children.map((c) => c.name), ['Hero Card', 'div#main-nav', 'button · Close', 'div.product-card', 'div', 'img · Profile', 'button · Submit'], 'names');
+    },
+  },
+  {
+    id: 'root-title-name',
+    title: '문서 <title> 이 있으면 결과 프레임 이름이 된다',
+    width: 375,
+    html: '<!DOCTYPE html><html><head><title>예약 화면</title></head><body><div>a</div><div>b</div></body></html>',
+    check: ({ root }, t) => t.eq(root.name, '예약 화면', 'root name'),
+  },
+
   // ── 이미지 ───────────────────────────────────────────────
   {
     id: 'image-img',

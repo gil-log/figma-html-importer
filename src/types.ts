@@ -87,6 +87,7 @@ export interface TextBox {
 
 export interface DomNodeData {
   tagName: string;
+  name?: string;           // Figma 레이어 이름 (data-name·id·aria-label 등에서, 없으면 tagName)
   text?: string;           // 텍스트 리프 노드의 텍스트 콘텐츠 (공백은 CSS white-space 규칙대로 접힌 상태)
   textSegments?: TextSegment[];  // 인라인 혼합 콘텐츠의 스타일 구간
   textBox?: TextBox;       // 실제 글자 줄 상자들의 합집합 (노드 rect 기준, Range 로 측정)
@@ -129,6 +130,8 @@ export interface ImportDomMessage {
   type: 'import-dom';
   data: DomNodeData;
   images?: Record<string, ImageAsset>;
+  /** 문서 <title> (루트 프레임 이름) */
+  title?: string;
 }
 
 export type UIToMainMessage = ImportDomMessage;

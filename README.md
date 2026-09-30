@@ -102,6 +102,9 @@ text nodes, and vectors.
   with styled ranges and line breaks. Inline pieces that draw their own box — badges with a
   background, icons, `inline-block` or `display: block` children — stay separate layers at their
   measured positions. Children hidden with `display: none` are left out.
+- **Layer names** — layers are named from `data-name` (or `data-figma-name`), `id`, `aria-label`,
+  image `alt`, button/link text, or a meaningful class name; utility classes (Tailwind) are ignored.
+  The imported frame takes the document `<title>`.
 - **Stacking order** — sibling layers are ordered the way CSS paints them: negative `z-index`, then
   in-flow content, then positioned elements, then positive `z-index` (flex and grid items honor
   `z-index` without `position`), so overlays declared first still land on top.

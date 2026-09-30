@@ -1008,7 +1008,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
 
     if ((hasBorder || hasBg) && !node.collapsed) {
       const frame = figma.createFrame();
-      frame.name = tagName;
+      frame.name = node.name ?? tagName;
       frame.resize(w, h);
       frame.x = rect.x;
       frame.y = rect.y;
@@ -1026,7 +1026,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     if (node.transform) {
       // 회전된 텍스트: 요소 크기의 투명 프레임에 넣고 프레임을 회전시킨다
       const wrapper = figma.createFrame();
-      wrapper.name = tagName;
+      wrapper.name = node.name ?? tagName;
       wrapper.fills = [];
       wrapper.clipsContent = false;
       wrapper.resize(w, h);
@@ -1052,7 +1052,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     if (node.svgHtml) {
       try {
         const svgFrame = figma.createNodeFromSvg(node.svgHtml);
-        svgFrame.name = 'svg-icon';
+        svgFrame.name = node.name ?? 'svg-icon';
         svgFrame.fills = [];          // 배경 투명
         // SVG HTML에 이미 정확한 픽셀 width/height가 주입되어 있으므로
         // resize는 실질적 no-op이지만, 부모 좌표계 정합성을 위해 수행
@@ -1092,7 +1092,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   if (tagName === 'img' || tagName === 'canvas' || tagName === 'video') {
     const imgRect = figma.createRectangle();
     const hash = imageHash(imageUrl);
-    imgRect.name = hash ? tagName : `${tagName} (placeholder)`;
+    imgRect.name = hash ? node.name ?? tagName : `${node.name ?? tagName} (placeholder)`;
     imgRect.resize(w, h);
     imgRect.fills = hash
       ? [{ type: 'IMAGE', imageHash: hash, scaleMode: objectFitScaleMode(style.objectFit) }]
@@ -1139,7 +1139,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
   applyRotation(frame, node);
   if (!visible) frame.visible = false;
   parent.appendChild(frame);
-  frame.name = tagName;
+  frame.name = node.name ?? tagName;
 
   frameCount++;
 }
@@ -1175,7 +1175,7 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
 
     // 루트 컨테이너 Frame 생성
     const rootFrame = figma.createFrame();
-    rootFrame.name = 'HTML Import';
+    rootFrame.name = msg.title?.trim() || data.name || 'HTML Import';
     rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
 
     // 페이지에 추가 후 뷰포트 중앙 배치
