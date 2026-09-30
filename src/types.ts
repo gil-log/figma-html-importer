@@ -4,6 +4,9 @@ export interface DomStyleData {
   // 배경
   backgroundColor: string;
   backgroundImage: string;
+  backgroundSize: string;
+  backgroundRepeat: string;
+  objectFit: string;
 
   // 텍스트
   color: string;
@@ -83,7 +86,7 @@ export interface DomNodeData {
   wrapBox?: { x: number; width: number };  // 여러 줄일 때 줄바꿈 기준 폭 (content box, 노드 rect 기준)
   lineCount?: number;      // 브라우저에서 실제로 그려진 줄 수
   truncate?: { maxLines: number };  // text-overflow:ellipsis / -webkit-line-clamp
-  imageUrl?: string;       // <img> src
+  imageUrl?: string;       // <img> src, <canvas> 내용(data URL), <video> poster
   svgHtml?: string;        // <svg> 직렬화 HTML (<use> 참조 인라인 처리 후)
   rect: {
     x: number;            // 부모 기준 상대 좌표
@@ -107,10 +110,18 @@ export interface DomNodeData {
 
 // ─── 메시지 타입 ──────────────────────────────────────────────
 
+/** UI 에서 받아온 이미지 (PNG·JPEG·GIF, 최대 4096px) — width/height 는 원본 크기 */
+export interface ImageAsset {
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+}
+
 // UI → Main
 export interface ImportDomMessage {
   type: 'import-dom';
   data: DomNodeData;
+  images?: Record<string, ImageAsset>;
 }
 
 export type UIToMainMessage = ImportDomMessage;

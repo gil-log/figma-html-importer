@@ -8,6 +8,8 @@ import { find, all, findText, findTextIncl, texts, solid, hasSolid, gradientHand
 const TW = '<script src="https://cdn.tailwindcss.com"></script>';
 const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
+const SVG_IMG = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>')}`;
+const imageFill = (n) => (n?.fills || []).find((f) => f.type === 'IMAGE');
 const frameBy = (root, pred) => find(root, (n) => n.type === 'FRAME' && pred(n));
 const solidFrame = (root, rgb) => frameBy(root, (n) => hasSolid(n, rgb));
 
@@ -299,6 +301,68 @@ export const cases = [
       const img = find(root, (n) => n.type === 'RECTANGLE');
       t.near(img?.width, 40, 0.5, 'width');
       t.near(img?.height, 30, 0.5, 'height');
+    },
+  },
+
+  // ── 이미지 ───────────────────────────────────────────────
+  {
+    id: 'image-img',
+    title: '<img> 는 실제 이미지 fill 로 들어간다',
+    width: 375,
+    html: `<div><img src="${PNG_1PX}" style="width:40px;height:30px;display:block"></div>`,
+    check: ({ root }, t) => {
+      const img = find(root, (n) => n.type === 'RECTANGLE');
+      t.eq(imageFill(img)?.scaleMode, 'FILL', 'image fill');
+    },
+  },
+  {
+    id: 'image-object-fit-contain',
+    title: 'object-fit:contain 이미지는 FIT 으로 들어간다',
+    width: 375,
+    html: `<div><img src="${PNG_1PX}" style="width:40px;height:30px;display:block;object-fit:contain"></div>`,
+    check: ({ root }, t) => t.eq(imageFill(find(root, (n) => n.type === 'RECTANGLE'))?.scaleMode, 'FIT', 'scaleMode'),
+  },
+  {
+    id: 'image-svg-converted',
+    title: 'SVG 이미지(<img src=*.svg>)는 PNG 로 바꿔 이미지로 들어간다',
+    width: 375,
+    html: `<div><img src="${SVG_IMG}" style="width:20px;height:20px;display:block"></div>`,
+    check: ({ root }, t) => t.ok(imageFill(find(root, (n) => n.type === 'RECTANGLE')), 'image fill'),
+  },
+  {
+    id: 'image-bg-cover',
+    title: 'background-image url() + cover 는 배경색 위의 이미지 fill(FILL)로 들어간다',
+    width: 375,
+    html: `<div><div style="width:100px;height:50px;background:#eee url(${PNG_1PX}) center/cover no-repeat"></div></div>`,
+    check: ({ root }, t) => {
+      const f = frameBy(root, (n) => n.width === 100);
+      t.eq((f?.fills || []).map((p) => p.type), ['SOLID', 'IMAGE'], 'fills');
+      t.eq(imageFill(f)?.scaleMode, 'FILL', 'scaleMode');
+    },
+  },
+  {
+    id: 'image-bg-tile',
+    title: '반복되는 배경 이미지는 타일로 들어간다',
+    width: 375,
+    html: `<div><div style="width:100px;height:50px;background:url(${PNG_1PX}) repeat"></div></div>`,
+    check: ({ root }, t) => t.eq(imageFill(frameBy(root, (n) => n.width === 100))?.scaleMode, 'TILE', 'scaleMode'),
+  },
+  {
+    id: 'image-canvas',
+    title: '스크립트로 그린 <canvas> 는 그려진 내용이 이미지로 들어간다',
+    width: 375,
+    html: '<div><canvas id="c" width="20" height="20" style="display:block"></canvas></div><script>document.getElementById("c").getContext("2d").fillRect(0,0,20,20)</script>',
+    check: ({ root }, t) => t.ok(imageFill(find(root, (n) => n.type === 'RECTANGLE')), 'image fill'),
+  },
+  {
+    id: 'image-unreachable',
+    title: '불러올 수 없는 이미지는 크기가 같은 회색 자리표시로 들어간다',
+    width: 375,
+    html: '<div><img src="https://invalid.invalid/a.png" width="40" height="30" style="display:block"></div>',
+    check: ({ root }, t) => {
+      const img = find(root, (n) => n.type === 'RECTANGLE');
+      t.eq(img?.fills?.[0]?.type, 'SOLID', 'placeholder');
+      t.near(img?.width, 40, 0.5, 'width');
     },
   },
 

@@ -35,6 +35,7 @@ function summarize(n, depth = 0, out = []) {
   const r = (v) => Math.round(v * 10) / 10;
   let line = `${'  '.repeat(depth)}${n.type} "${n.name}" (${r(n.x)},${r(n.y)} ${r(n.width)}x${r(n.height)})`;
   if (n.type === 'TEXT') line += ` ${JSON.stringify(n.characters)} ${n.textAutoResize} ${n.textAlignHorizontal} ${n.fontName.family}/${n.fontName.style}`;
+  if (n.type !== 'TEXT' && n.fills?.length) line += ` fills=[${n.fills.map((f) => f.type === 'IMAGE' ? `IMAGE:${f.scaleMode}` : f.type).join(',')}]`;
   if (n.svg) line += ` ${n.svg.length > 240 ? n.svg.slice(0, 240) + '…' : n.svg}`;
   out.push(line);
   for (const c of n.children || []) summarize(c, depth + 1, out);

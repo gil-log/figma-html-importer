@@ -16,6 +16,8 @@ text nodes, and vectors.
 - **Isolated rendering** — the HTML is rendered in its own sandboxed iframe sized to the chosen
   viewport, so `<head>` styles and `<script>` tags run in document order just like a normal page,
   and nothing leaks between imports. Scripts that throw or call `alert()` cannot break the plugin.
+- **External resources** — `<link>` stylesheets, web fonts (Google Fonts, `@font-face`), and
+  scripts from any CDN load before capture, and text is measured after the web fonts finish loading.
 - **Tailwind CSS support** — the Tailwind Play CDN script in your HTML works as-is, including
   `tailwind.config = {...}` and `<style type="text/tailwindcss">` with `@apply`.
 - **Responsive viewport** — choose from 6 presets (375×812 Mobile through 3840×2160 Extra Wide).
@@ -76,8 +78,10 @@ text nodes, and vectors.
 - **`<use>` inlining** — sprite references are resolved (symbol `viewBox`, `x`/`y` offsets, and
   references to plain elements), and gradients or clip paths defined in another SVG's `<defs>` are
   copied in.
-- **Image placeholders** — `<img>` tags become light-gray rounded rectangles preserving the original
-  dimensions.
+- **Images** — `<img>` (the `srcset` candidate the browser picked), CSS `background-image: url()`
+  (`cover`, `contain`, repeating tiles), `<canvas>` drawings, and `<video>` posters become Figma image
+  fills with `object-fit` respected. SVG, WebP, and AVIF images, and images larger than 4096px, are
+  converted to PNG first. Images that cannot be fetched become gray placeholders of the same size.
 
 ### Advanced DOM Handling
 
@@ -115,8 +119,8 @@ text nodes, and vectors.
 
 ## Limitations
 
-- External images are shown as placeholder rectangles (Figma plugin sandbox cannot fetch
-  cross-origin images).
+- Images served without CORS headers (`Access-Control-Allow-Origin`) cannot be read by the plugin and
+  are shown as placeholders.
 - Fonts that are not available in your Figma fall back as described above.
 - `position: fixed` elements are placed relative to the whole page, so a fixed bottom bar ends up at
   the bottom of the imported frame.

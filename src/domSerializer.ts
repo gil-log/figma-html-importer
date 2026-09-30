@@ -12,7 +12,7 @@ import type { DomNodeData, DomStyleData, TextSegment } from './types';
 
 const SKIP_TAGS = new Set([
   'script', 'style', 'meta', 'link', 'head', 'noscript', 'title', 'base',
-  'template', 'canvas', 'video', 'audio',
+  'template', 'audio',
   // hr은 제거 — 구분선으로 직접 렌더링
   // br 은 텍스트 흐름 안에서 줄바꿈으로 처리
 ]);
@@ -24,6 +24,19 @@ const REPLACED_TAGS = new Set([
 ]);
 
 const FORM_TAGS = new Set(['input', 'textarea', 'select']);
+
+// 이미지로 가져오는 요소: <img>, 그려진 내용을 쓰는 <canvas>, 포스터를 쓰는 <video>
+const MEDIA_TAGS = new Set(['img', 'canvas', 'video']);
+
+function mediaImageUrl(el: Element, tag: string): string | undefined {
+  if (tag === 'img') return (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || undefined;
+  if (tag === 'video') return (el as HTMLVideoElement).poster || undefined;
+  try {
+    return (el as HTMLCanvasElement).toDataURL('image/png');
+  } catch {
+    return undefined; // 다른 출처 이미지를 그린 canvas 는 읽을 수 없다
+  }
+}
 
 /** 요소가 속한 문서(렌더 iframe)의 window */
 function winOf(el: Element): Window {
@@ -346,6 +359,9 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
       if (bgClip === 'text') return '';
       return cs.backgroundImage || '';
     })(),
+    backgroundSize: cs.backgroundSize,
+    backgroundRepeat: cs.backgroundRepeat,
+    objectFit: cs.objectFit,
     color: textColor(cs),
     fontSize: pf(cs.fontSize) || 14,
     fontWeight: cs.fontWeight,
@@ -951,7 +967,7 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
     };
 
   // 크기 0 인 그림·폼 요소는 보이는 것이 없다
-  if (collapsed && (tag === 'svg' || tag === 'img' || FORM_TAGS.has(tag))) return null;
+  if (collapsed && (tag === 'svg' || MEDIA_TAGS.has(tag) || FORM_TAGS.has(tag))) return null;
 
   // SVG: outerHTML을 직렬화하여 Figma에서 createNodeFromSvg로 재현
   if (tag === 'svg') {
@@ -971,8 +987,8 @@ export function serializeDom(el: Element, parentRect: DOMRect): DomNodeData | nu
   applyRadii(node.style, cs, rect.width, rect.height);
 
   if (FORM_TAGS.has(tag)) return serializeFormControl(el, cs, rect, node);
-  if (tag === 'img') {
-    node.imageUrl = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || undefined;
+  if (MEDIA_TAGS.has(tag)) {
+    node.imageUrl = mediaImageUrl(el, tag);
     return node;
   }
 

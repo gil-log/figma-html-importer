@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {serializeDom} from '../domSerializer';
 import type {DomNodeData, MainToUIMessage} from '../types';
 import {canvasBackground, findRenderRoot, prepareForCapture, renderHtml} from './render';
+import {collectImageUrls, loadImages} from './images';
 
 // 렌더 폭별 뷰포트 높이 (vh 단위·position:fixed 기준)
 const WIDTH_OPTIONS = [
@@ -79,8 +80,11 @@ export default function App() {
       if (page) applyCanvasBackground(domData, canvasBackground(doc, win));
       if (!hasBackground(domData)) domData.style.backgroundColor = WHITE;
 
+      // ── 4. 참조된 이미지를 바이트로 받아 함께 보낸다 (못 받은 것은 자리표시) ──
+      const images = await loadImages(collectImageUrls(domData));
+
       setStatus('building');
-      parent.postMessage({pluginMessage: {type: 'import-dom', data: domData}}, '*');
+      parent.postMessage({pluginMessage: {type: 'import-dom', data: domData, images}}, '*');
     } catch (e: any) {
       setStatus('error');
       setError(e.message ?? String(e));
@@ -180,7 +184,7 @@ export default function App() {
         {/* 설명 */}
         <div className="hint">
           Chrome에서 렌더링한 것과 동일하게 Figma 레이어로 변환합니다.<br/>
-          외부 폰트/이미지는 Inter 폰트 및 회색 placeholder로 대체됩니다.
+          불러올 수 없는 이미지(CORS 차단 등)는 회색 자리표시로 대체됩니다.
         </div>
       </div>
   );

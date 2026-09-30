@@ -4,7 +4,7 @@
  * UI로부터 DomNodeData 트리를 받아 Figma API로 노드를 재귀 생성한다.
  * DOM API 없음, Figma API만 사용 가능.
  */
-import type { DomNodeData, DomStyleData, UIToMainMessage, MainToUIMessage } from './types';
+import type { DomNodeData, DomStyleData, ImageAsset, UIToMainMessage, MainToUIMessage } from './types';
 
 figma.showUI(__html__, { width: 400, height: 580, themeColors: true });
 
@@ -451,13 +451,69 @@ function backgroundPaints(s: DomStyleData, w: number, h: number): Paint[] {
   const solid = toSolidPaint(s.backgroundColor);
   if (solid) paints.push(solid);
   if (s.backgroundImage && s.backgroundImage !== 'none') {
-    const layers = splitTopLevelCommas(s.backgroundImage).reverse();
-    for (const layer of layers) {
-      const grad = parseLinearGradient(layer, w, h);
-      if (grad) paints.push(grad);
-    }
+    const layers = splitTopLevelCommas(s.backgroundImage);
+    // background-size/repeat 목록은 레이어 수보다 짧으면 반복해서 대응된다
+    const sizes = splitTopLevelCommas(s.backgroundSize || 'auto');
+    const repeats = splitTopLevelCommas(s.backgroundRepeat || 'repeat');
+    const layerPaints: Paint[] = [];
+    layers.forEach((layer, i) => {
+      const paint = parseLinearGradient(layer, w, h) ??
+        backgroundImagePaint(layer, sizes[i % sizes.length], repeats[i % repeats.length]);
+      if (paint) layerPaints.push(paint);
+    });
+    paints.push(...layerPaints.reverse());
   }
   return paints;
+}
+
+// ─── 이미지 ───────────────────────────────────────────────────
+
+let imageAssets: Record<string, ImageAsset> = {};
+const imageHashes = new Map<string, string | null>();
+
+/** UI 가 받아 온 이미지 → Figma 이미지 해시 (같은 URL 은 한 번만 만든다) */
+function imageHash(url: string | undefined): string | null {
+  if (!url) return null;
+  const cached = imageHashes.get(url);
+  if (cached !== undefined) return cached;
+  let hash: string | null = null;
+  const asset = imageAssets[url];
+  if (asset) {
+    try {
+      hash = figma.createImage(asset.bytes).hash;
+    } catch (err) {
+      console.error('[html-importer] createImage error:', err);
+    }
+  }
+  imageHashes.set(url, hash);
+  return hash;
+}
+
+/** object-fit → scaleMode. contain 류는 FIT, 나머지(cover·fill·none)는 FILL */
+function objectFitScaleMode(fit: string | undefined): 'FILL' | 'FIT' {
+  return fit === 'contain' || fit === 'scale-down' ? 'FIT' : 'FILL';
+}
+
+/**
+ * background-image: url(...) 레이어 → 이미지 fill.
+ * cover → FILL, contain → FIT, 반복되는 원본 크기/px 크기 → TILE, 그 외(100% 100% 등) → FILL
+ */
+function backgroundImagePaint(layer: string, size: string, repeat: string): ImagePaint | null {
+  const m = layer.trim().match(/^url\(\s*["']?([^"')]+)["']?\s*\)$/);
+  if (!m) return null;
+  const hash = imageHash(m[1]);
+  if (!hash) return null;
+  const sz = (size || 'auto').trim();
+  if (sz === 'cover') return { type: 'IMAGE', imageHash: hash, scaleMode: 'FILL' };
+  if (sz === 'contain') return { type: 'IMAGE', imageHash: hash, scaleMode: 'FIT' };
+  const tiles = !/^no-repeat/.test((repeat || 'repeat').trim());
+  if (tiles) {
+    const asset = imageAssets[m[1]];
+    const px = sz.match(/^([\d.]+)px/);
+    const factor = px && asset?.width ? parseFloat(px[1]) / asset.width : 1;
+    if (px || /^auto/.test(sz)) return { type: 'IMAGE', imageHash: hash, scaleMode: 'TILE', scalingFactor: factor };
+  }
+  return { type: 'IMAGE', imageHash: hash, scaleMode: 'FILL' };
 }
 
 /** #hex 색상 파싱 보조 */
@@ -844,12 +900,15 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     return;
   }
 
-  // ── 이미지 플레이스홀더 (<img>) ────────────────────
-  if (tagName === 'img') {
+  // ── 이미지 (<img>, <canvas>, <video poster>) — 받아오지 못했으면 회색 자리표시 ──
+  if (tagName === 'img' || tagName === 'canvas' || tagName === 'video') {
     const imgRect = figma.createRectangle();
-    imgRect.name = imageUrl ? 'img' : 'img (placeholder)';
+    const hash = imageHash(imageUrl);
+    imgRect.name = hash ? tagName : `${tagName} (placeholder)`;
     imgRect.resize(w, h);
-    imgRect.fills = [{ type: 'SOLID', color: { r: 0.88, g: 0.9, b: 0.92 } }];
+    imgRect.fills = hash
+      ? [{ type: 'IMAGE', imageHash: hash, scaleMode: objectFitScaleMode(style.objectFit) }]
+      : [{ type: 'SOLID', color: { r: 0.88, g: 0.9, b: 0.92 } }];
     applyCornerRadius(imgRect, style);
     applyEffects(imgRect, style);
     if (style.opacity < 1) imgRect.opacity = style.opacity;
@@ -919,6 +978,8 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
 
   frameCount = 0;
   textCount = 0;
+  imageAssets = msg.images ?? {};
+  imageHashes.clear();
 
   try {
     const data = msg.data;
