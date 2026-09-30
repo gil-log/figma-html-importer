@@ -4,7 +4,9 @@
  * UI로부터 DomNodeData 트리를 받아 Figma API로 노드를 재귀 생성한다.
  * DOM API 없음, Figma API만 사용 가능.
  */
-import type { DomNodeData, DomStyleData, ImageAsset, ImportOptions, UIToMainMessage, MainToUIMessage } from './types';
+import type {
+  DomNodeData, DomStyleData, ImageAsset, ImportOptions, ImportPage, UIToMainMessage, MainToUIMessage,
+} from './types';
 
 figma.showUI(__html__, { width: 400, height: 580, themeColors: true });
 
@@ -1287,61 +1289,103 @@ function contentExtent(frame: FrameNode): { right: number; bottom: number } {
 
 // ─── 메시지 핸들러 ────────────────────────────────────────────
 
+/** 루트 프레임 하나 생성 (위치는 호출한 쪽에서 정한다) */
+async function buildRoot(page: ImportPage, target: BaseNode & ChildrenMixin, multi: boolean): Promise<FrameNode> {
+  const data = page.data;
+  const rootFrame = figma.createFrame();
+  const baseName = page.title?.trim() || data.name || 'HTML Import';
+  rootFrame.name = multi ? `${baseName} · ${page.width}` : baseName;
+  rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
+  target.appendChild(rootFrame);
+
+  const isLeaf = (!!data.text && data.children.length === 0) || data.tagName === 'svg' || data.tagName === 'img';
+  if (isLeaf) {
+    // 버튼·아이콘처럼 요소 하나만 붙여넣은 경우: 루트 프레임 안에 요소 자신을 (0,0) 에 만든다
+    rootFrame.fills = [];
+    rootFrame.clipsContent = false;
+    await buildTree({ ...data, rect: { ...data.rect, x: 0, y: 0 } }, rootFrame);
+    return rootFrame;
+  }
+
+  applyFrameStyle(rootFrame, data.style, data.rect.width, data.rect.height);
+  // 자식 노드 재귀 생성
+  const built: BuiltChild[] = [];
+  for (const child of data.children) {
+    const before = rootFrame.children.length;
+    try {
+      await buildTree(child, rootFrame);
+    } catch (err) {
+      console.error('[html-importer] child error:', err);
+    }
+    if (rootFrame.children.length === before + 1) built.push({ data: child, scene: rootFrame.children[before] });
+  }
+  if (importOptions.autoLayout && built.length === data.children.length) tryAutoLayout(rootFrame, data, built);
+  // 페이지 밖으로 넘친 자식(절대위치 요소 등)까지 루트가 감싸도록 늘린다 (루트가 자르지 않을 때만)
+  if (!rootFrame.clipsContent) {
+    const { right, bottom } = contentExtent(rootFrame);
+    if (right > rootFrame.width || bottom > rootFrame.height) {
+      rootFrame.resizeWithoutConstraints(Math.max(right, rootFrame.width), Math.max(bottom, rootFrame.height));
+    }
+  }
+  applyEffects(rootFrame, data.style);
+  return rootFrame;
+}
+
+/** "선택한 프레임 안에 넣기" 가 켜져 있고 프레임류가 선택돼 있으면 그 안, 아니면 현재 페이지 */
+function resolveTarget(): BaseNode & ChildrenMixin {
+  const selected = figma.currentPage.selection[0];
+  if (importOptions.intoSelection && selected &&
+    (selected.type === 'FRAME' || selected.type === 'COMPONENT' || selected.type === 'SECTION')) {
+    return selected;
+  }
+  return figma.currentPage;
+}
+
+const SETTINGS_KEY = 'settings';
+const ROOT_GAP = 80;
+
 figma.ui.onmessage = async function (msg: UIToMainMessage) {
+  if (msg.type === 'load-settings') {
+    const settings = await figma.clientStorage.getAsync(SETTINGS_KEY).catch(() => null);
+    figma.ui.postMessage({ type: 'settings', settings: settings ?? null } as MainToUIMessage);
+    return;
+  }
+  if (msg.type === 'save-settings') {
+    await figma.clientStorage.setAsync(SETTINGS_KEY, msg.settings).catch(() => undefined);
+    return;
+  }
   if (msg.type !== 'import-dom') return;
 
   frameCount = 0;
   textCount = 0;
-  imageAssets = msg.images ?? {};
   imageHashes.clear();
   importOptions = msg.options ?? {};
 
   try {
-    const data = msg.data;
-
-    // 루트 컨테이너 Frame 생성
-    const rootFrame = figma.createFrame();
-    rootFrame.name = msg.title?.trim() || data.name || 'HTML Import';
-    rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
-
-    // 페이지에 추가 후 뷰포트 중앙 배치
-    figma.currentPage.appendChild(rootFrame);
-    rootFrame.x = Math.round(figma.viewport.center.x - rootFrame.width / 2);
-    rootFrame.y = Math.round(figma.viewport.center.y - rootFrame.height / 2);
-
-    const isLeaf = (!!data.text && data.children.length === 0) || data.tagName === 'svg' || data.tagName === 'img';
-    if (isLeaf) {
-      // 버튼·아이콘처럼 요소 하나만 붙여넣은 경우: 루트 프레임 안에 요소 자신을 (0,0) 에 만든다
-      rootFrame.fills = [];
-      rootFrame.clipsContent = false;
-      await buildTree({ ...data, rect: { ...data.rect, x: 0, y: 0 } }, rootFrame);
-    } else {
-      applyFrameStyle(rootFrame, data.style, data.rect.width, data.rect.height);
-      // 자식 노드 재귀 생성
-      const built: BuiltChild[] = [];
-      for (const child of data.children) {
-        const before = rootFrame.children.length;
-        try {
-          await buildTree(child, rootFrame);
-        } catch (err) {
-          console.error('[html-importer] child error:', err);
-        }
-        if (rootFrame.children.length === before + 1) built.push({ data: child, scene: rootFrame.children[before] });
+    const target = resolveTarget();
+    const multi = msg.pages.length > 1;
+    const roots: FrameNode[] = [];
+    for (const page of msg.pages) {
+      imageAssets = page.images ?? {};
+      const root = await buildRoot(page, target, multi);
+      // 페이지에 넣을 때는 뷰포트 중앙, 선택한 프레임 안이면 왼쪽 위부터. 여러 폭은 오른쪽으로 나란히
+      const prev = roots[roots.length - 1];
+      if (prev) {
+        root.x = prev.x + prev.width + ROOT_GAP;
+        root.y = prev.y;
+      } else if (target.type === 'PAGE') {
+        root.x = Math.round(figma.viewport.center.x - root.width / 2);
+        root.y = Math.round(figma.viewport.center.y - root.height / 2);
+      } else {
+        root.x = 0;
+        root.y = 0;
       }
-      if (importOptions.autoLayout && built.length === data.children.length) tryAutoLayout(rootFrame, data, built);
-      // 페이지 밖으로 넘친 자식(절대위치 요소 등)까지 루트가 감싸도록 늘린다 (루트가 자르지 않을 때만)
-      if (!rootFrame.clipsContent) {
-        const { right, bottom } = contentExtent(rootFrame);
-        if (right > rootFrame.width || bottom > rootFrame.height) {
-          rootFrame.resizeWithoutConstraints(Math.max(right, rootFrame.width), Math.max(bottom, rootFrame.height));
-        }
-      }
-      applyEffects(rootFrame, data.style);
+      roots.push(root);
     }
 
     // 선택 후 줌
-    figma.currentPage.selection = [rootFrame];
-    figma.viewport.scrollAndZoomIntoView([rootFrame]);
+    figma.currentPage.selection = roots;
+    figma.viewport.scrollAndZoomIntoView(roots);
 
     figma.ui.postMessage({
       type: 'import-done',

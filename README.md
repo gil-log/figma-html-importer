@@ -127,12 +127,16 @@ text nodes, and vectors.
 
 ## How It Works
 
-1. **Paste HTML** — paste your markup into the text area.
-2. **Pick a render width** — select the viewport breakpoint.
-3. **Click "Import"** — the plugin renders the HTML off-screen, walks the DOM tree, serializes every
-   element's bounding rect and computed style, then sends the data to the Figma sandbox which builds
-   the layer tree.
-4. **Edit in Figma** — the result is a normal Figma frame you can move, resize, and style.
+1. **Paste HTML** — paste your markup into the text area, or open / drag-and-drop an `.html` file.
+   The last input, width, and options are remembered for the next run.
+2. **Pick a render width** — select a viewport preset, or "375 · 768 · 1440 — 나란히" to import the
+   mobile, tablet, and desktop layouts side by side in one go.
+3. **Pick options** — convert flex containers to Auto Layout, and/or place the result inside the
+   selected frame instead of the canvas.
+4. **Click "Import"** — the plugin renders the HTML in an off-screen iframe, walks the DOM tree,
+   serializes every element's bounding rect, measured text boxes, and computed style, fetches the
+   referenced images, then sends the data to the Figma sandbox which builds the layer tree.
+5. **Edit in Figma** — the result is a normal Figma frame you can move, resize, and style.
 
 ## Limitations
 

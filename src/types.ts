@@ -126,22 +126,48 @@ export interface ImageAsset {
   height: number;
 }
 
-// UI → Main
-export interface ImportDomMessage {
-  type: 'import-dom';
+/** 렌더 폭 하나의 가져오기 결과 */
+export interface ImportPage {
   data: DomNodeData;
   images?: Record<string, ImageAsset>;
   /** 문서 <title> (루트 프레임 이름) */
   title?: string;
-  options?: ImportOptions;
+  width: number;
 }
 
 export interface ImportOptions {
   /** flex 컨테이너를 Auto Layout 으로 변환 (브라우저 위치와 맞는 컨테이너만) */
   autoLayout?: boolean;
+  /** 선택한 프레임 안에 넣기 */
+  intoSelection?: boolean;
 }
 
-export type UIToMainMessage = ImportDomMessage;
+/** UI 입력·옵션 (clientStorage 에 저장해 다음 실행 때 복원) */
+export interface PluginSettings {
+  html: string;
+  renderWidth: number | 'multi';
+  autoLayout: boolean;
+  intoSelection: boolean;
+}
+
+// UI → Main
+export interface ImportDomMessage {
+  type: 'import-dom';
+  /** 여러 폭을 한 번에 가져오면 폭마다 한 페이지 (나란히 배치) */
+  pages: ImportPage[];
+  options?: ImportOptions;
+}
+
+export interface LoadSettingsMessage {
+  type: 'load-settings';
+}
+
+export interface SaveSettingsMessage {
+  type: 'save-settings';
+  settings: PluginSettings;
+}
+
+export type UIToMainMessage = ImportDomMessage | LoadSettingsMessage | SaveSettingsMessage;
 
 // Main → UI
 export interface ImportDoneMessage {
@@ -155,4 +181,9 @@ export interface ImportErrorMessage {
   error: string;
 }
 
-export type MainToUIMessage = ImportDoneMessage | ImportErrorMessage;
+export interface SettingsMessage {
+  type: 'settings';
+  settings: PluginSettings | null;
+}
+
+export type MainToUIMessage = ImportDoneMessage | ImportErrorMessage | SettingsMessage;

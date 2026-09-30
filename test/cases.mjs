@@ -1027,4 +1027,61 @@ export const cases = [
       t.ok(svgs.some((v) => v.includes('<linearGradient id="g1"') && v.includes('url(#g1)')), 'external gradient copied');
     },
   },
+  // ── 사용 편의 ─────────────────────────────────────────────
+  {
+    id: 'multi-width',
+    title: '375 · 768 · 1440 을 한 번에 가져오면 폭별 프레임이 오른쪽으로 나란히 생긴다',
+    width: 'multi',
+    html: '<style>.box{height:20px;background:blue}@media (min-width:768px){.box{background:red}}</style><div class="box"></div><p>text</p>',
+    check: ({ roots }, t) => {
+      t.eq(roots.map((r) => r.name), ['HTML Import · 375', 'HTML Import · 768', 'HTML Import · 1440'], 'names');
+      t.eq(roots.map((r) => r.width), [375, 768, 1440], 'widths');
+      t.ok(roots[1]?.x > roots[0]?.x + 375 && roots[2]?.x > roots[1]?.x + 768, 'side by side');
+      t.eq(roots.map((r) => r.y), [roots[0]?.y, roots[0]?.y, roots[0]?.y], 'top aligned');
+      t.eq(roots.map((r) => (solidFrame(r, [255, 0, 0]) ? 'red' : 'blue')), ['blue', 'red', 'red'], 'breakpoint per width');
+    },
+  },
+  {
+    id: 'into-selection',
+    title: '"선택한 프레임 안에 넣기" 를 켜면 선택한 프레임 안 왼쪽 위에 들어간다',
+    width: 375,
+    options: { intoSelection: true },
+    selectFrame: { width: 500, height: 400 },
+    html: '<div style="width:100px;height:40px;background:red"></div>',
+    check: ({ roots, selected }, t) => {
+      t.eq(roots.length, 0, 'not on the page');
+      t.eq(selected.length, 1, 'inside the selected frame');
+      t.eq([selected[0]?.x, selected[0]?.y], [0, 0], 'top-left');
+    },
+  },
+  {
+    id: 'into-selection-off',
+    title: '옵션을 끄면 프레임을 선택해 둬도 페이지에 들어간다',
+    width: 375,
+    selectFrame: { width: 500, height: 400 },
+    html: '<div style="width:100px;height:40px;background:red"></div>',
+    check: ({ roots, selected }, t) => {
+      t.eq(roots.length, 1, 'on the page');
+      t.eq(selected.length, 0, 'selected frame untouched');
+    },
+  },
+  {
+    id: 'settings-restore',
+    title: '다시 열면 마지막 입력 HTML·렌더 폭·옵션이 복원된다',
+    width: 768,
+    options: { autoLayout: true },
+    html: '<div id="remember-me">x</div>',
+    uiAction: { name: 'reloadUiState', args: [] },
+    check: ({ ui }, t) => {
+      t.ok(ui?.html.includes('remember-me'), 'html restored');
+      t.eq(ui?.width, '768', 'width restored');
+      t.eq(ui?.autoLayout, true, 'option restored');
+    },
+  },
+  {
+    id: 'file-drop',
+    title: '.html 파일을 입력 영역에 끌어놓으면 내용이 채워진다',
+    uiAction: { name: 'dropFile', args: ['page.html', '<p>dropped file</p>'] },
+    check: ({ ui }, t) => t.eq(ui?.html, '<p>dropped file</p>', 'textarea'),
+  },
 ];

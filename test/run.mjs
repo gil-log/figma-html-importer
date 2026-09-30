@@ -95,11 +95,13 @@ for (const c of selected) {
   const t = createT();
   let error;
   try {
-    const steps = c.sequence || [c];
-    let res;
+    const steps = c.sequence || (c.html ? [c] : []);
+    let res = { roots: [], selected: [] };
     for (const { html, width, theme, options, selectFrame } of steps) {
       res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame });
     }
+    // 가져오기 뒤 UI 동작 (새로 띄우기·파일 끌어놓기 등)
+    if (c.uiAction) res.ui = await page.evaluate(({ name, args }) => window[name](...args), c.uiAction);
     if (dump) console.log(res.roots.map((r) => summarize(r)).join('\n'));
     c.check({ ...res, root: res.roots[0] }, t);
   } catch (e) {

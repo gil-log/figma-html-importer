@@ -1,6 +1,6 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {serializeDom} from '../domSerializer';
-import type {DomNodeData, MainToUIMessage} from '../types';
+import type {DomNodeData, ImportPage, MainToUIMessage, PluginSettings} from '../types';
 import {canvasBackground, findRenderRoot, prepareForCapture, renderHtml} from './render';
 import {collectImageUrls, loadImages} from './images';
 
@@ -13,7 +13,10 @@ const WIDTH_OPTIONS = [
   {label: '2880px — Multi-screen', value: 2880, height: 1620},
   {label: '3840px — Extra Wide', value: 3840, height: 2160},
 ];
+// "여러 폭 한 번에" 로 나란히 가져오는 폭
+const MULTI_WIDTHS = [375, 768, 1440];
 
+type RenderWidth = number | 'multi';
 type Status = 'idle' | 'rendering' | 'parsing' | 'building' | 'done' | 'error';
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -26,16 +29,26 @@ const STATUS_LABEL: Record<Status, string> = {
 };
 
 const WHITE = 'rgb(255, 255, 255)';
+// clientStorage 에 저장할 HTML 최대 길이 (너무 긴 입력은 기억하지 않는다)
+const MAX_SAVED_HTML = 500_000;
+
+const post = (pluginMessage: unknown) => parent.postMessage({pluginMessage}, '*');
 
 export default function App() {
   const [html, setHtml] = useState('');
-  const [renderWidth, setRenderWidth] = useState(1440);
+  const [renderWidth, setRenderWidth] = useState<RenderWidth>(1440);
   const [autoLayout, setAutoLayout] = useState(false);
+  const [intoSelection, setIntoSelection] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
+  const [progress, setProgress] = useState('');
   const [result, setResult] = useState<{ frameCount: number; textCount: number } | null>(null);
   const [error, setError] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const htmlRef = useRef(html);
+  htmlRef.current = html;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Figma main thread 메시지 수신
+  // Figma main thread 메시지 수신 + 지난번 입력·옵션 불러오기
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       const msg = e.data?.pluginMessage as MainToUIMessage | undefined;
@@ -46,11 +59,30 @@ export default function App() {
       } else if (msg.type === 'import-error') {
         setStatus('error');
         setError(msg.error);
+      } else if (msg.type === 'settings' && msg.settings) {
+        const s = msg.settings;
+        // 불러오는 사이 사용자가 이미 입력했으면 덮어쓰지 않는다
+        if (!htmlRef.current) setHtml(s.html ?? '');
+        if (s.renderWidth === 'multi' || WIDTH_OPTIONS.some((o) => o.value === s.renderWidth)) setRenderWidth(s.renderWidth);
+        setAutoLayout(!!s.autoLayout);
+        setIntoSelection(!!s.intoSelection);
       }
     };
     window.addEventListener('message', handler);
+    post({type: 'load-settings'});
     return () => window.removeEventListener('message', handler);
   }, []);
+
+  const saveSettings = (next: Partial<PluginSettings>) => {
+    const settings: PluginSettings = {
+      html: html.length <= MAX_SAVED_HTML ? html : '',
+      renderWidth,
+      autoLayout,
+      intoSelection,
+      ...next,
+    };
+    post({type: 'save-settings', settings});
+  };
 
   const handleImport = useCallback(async () => {
     if (!html.trim()) return;
@@ -58,49 +90,65 @@ export default function App() {
     setStatus('rendering');
     setError('');
     setResult(null);
+    saveSettings({});
 
-    const option = WIDTH_OPTIONS.find((o) => o.value === renderWidth) ?? WIDTH_OPTIONS[2];
-    let rendered: Awaited<ReturnType<typeof renderHtml>> | null = null;
+    const widths = renderWidth === 'multi' ? MULTI_WIDTHS : [renderWidth];
+    const pages: ImportPage[] = [];
     try {
-      // ── 1. 렌더 폭×높이 iframe 에서 렌더링 (스크립트·Tailwind·웹폰트 처리 대기 포함) ──
-      rendered = await renderHtml(html, {width: option.value, height: option.height});
-      const {doc, win} = rendered;
+      for (const [i, width] of widths.entries()) {
+        setProgress(widths.length > 1 ? ` (${width}px · ${i + 1}/${widths.length})` : '');
+        const option = WIDTH_OPTIONS.find((o) => o.value === width) ?? WIDTH_OPTIONS[2];
+        setStatus('rendering');
+        // ── 1. 렌더 폭×높이 iframe 에서 렌더링 (스크립트·Tailwind·웹폰트 처리 대기 포함) ──
+        const rendered = await renderHtml(html, {width: option.value, height: option.height});
+        try {
+          const {doc, win} = rendered;
+          setStatus('parsing');
+          prepareForCapture(doc, win);
 
-      setStatus('parsing');
-      prepareForCapture(doc, win);
+          // ── 2. 루트 결정 후 직렬화 ────────────────────────────
+          const {root, page} = findRenderRoot(doc, win);
+          const domData = serializeDom(root, root.getBoundingClientRect());
+          if (!domData) throw new Error(
+              `<${root.tagName.toLowerCase()}> 요소 크기가 0입니다.\n` +
+              '콘텐츠가 없거나 스타일이 적용되지 않은 요소입니다.'
+          );
 
-      // ── 2. 루트 결정 후 직렬화 ────────────────────────────
-      const {root, page} = findRenderRoot(doc, win);
-      const domData = serializeDom(root, root.getBoundingClientRect());
-      if (!domData) throw new Error(
-          `<${root.tagName.toLowerCase()}> 요소 크기가 0입니다.\n` +
-          '콘텐츠가 없거나 스타일이 적용되지 않은 요소입니다.'
-      );
+          // ── 3. 루트 배경: 페이지면 캔버스 배경(html → body 전파), 없으면 브라우저처럼 흰색 ──
+          if (page) applyCanvasBackground(domData, canvasBackground(doc, win));
+          if (!hasBackground(domData)) domData.style.backgroundColor = WHITE;
 
-      // ── 3. 루트 배경: 페이지면 캔버스 배경(html → body 전파), 없으면 브라우저처럼 흰색 ──
-      if (page) applyCanvasBackground(domData, canvasBackground(doc, win));
-      if (!hasBackground(domData)) domData.style.backgroundColor = WHITE;
+          // ── 4. 참조된 이미지를 바이트로 받아 함께 보낸다 (못 받은 것은 자리표시) ──
+          const images = await loadImages(collectImageUrls(domData));
+          pages.push({data: domData, images, title: doc.title, width: option.value});
+        } finally {
+          rendered.dispose();
+        }
+      }
 
-      // ── 4. 참조된 이미지를 바이트로 받아 함께 보낸다 (못 받은 것은 자리표시) ──
-      const images = await loadImages(collectImageUrls(domData));
-
+      setProgress('');
       setStatus('building');
-      parent.postMessage({pluginMessage: {
-        type: 'import-dom', data: domData, images, title: doc.title, options: {autoLayout},
-      }}, '*');
+      post({type: 'import-dom', pages, options: {autoLayout, intoSelection}});
     } catch (e: any) {
       setStatus('error');
       setError(e.message ?? String(e));
-    } finally {
-      rendered?.dispose();
     }
-  }, [html, renderWidth, autoLayout]);
+  }, [html, renderWidth, autoLayout, intoSelection]);
 
   const handleReset = () => {
     setStatus('idle');
     setResult(null);
     setError('');
     setHtml('');
+  };
+
+  /** .html 파일 열기·끌어놓기 */
+  const loadFile = async (file: File | undefined) => {
+    if (!file) return;
+    setHtml(await file.text());
+    setStatus('idle');
+    setResult(null);
+    setError('');
   };
 
   const isImporting = status === 'rendering' || status === 'parsing' || status === 'building';
@@ -116,6 +164,24 @@ export default function App() {
             <polyline points="8 6 2 12 8 18"/>
           </svg>
           <span className="header-title">HTML → Figma</span>
+          <button
+              className="file-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+              title="HTML 파일 열기"
+          >
+            파일 열기
+          </button>
+          <input
+              ref={fileInputRef}
+              type="file"
+              accept=".html,.htm,text/html"
+              hidden
+              onChange={(e) => {
+                void loadFile(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+          />
         </div>
 
         {/* 렌더 너비 선택 */}
@@ -124,12 +190,17 @@ export default function App() {
           <select
               className="select"
               value={renderWidth}
-              onChange={(e) => setRenderWidth(Number(e.target.value))}
+              onChange={(e) => {
+                const v = e.target.value === 'multi' ? 'multi' : Number(e.target.value);
+                setRenderWidth(v);
+                saveSettings({renderWidth: v});
+              }}
               disabled={isImporting}
           >
             {WIDTH_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
             ))}
+            <option value="multi">375 · 768 · 1440 — 나란히</option>
           </select>
         </div>
 
@@ -139,17 +210,45 @@ export default function App() {
               id="opt-autolayout"
               type="checkbox"
               checked={autoLayout}
-              onChange={(e) => setAutoLayout(e.target.checked)}
+              onChange={(e) => {
+                setAutoLayout(e.target.checked);
+                saveSettings({autoLayout: e.target.checked});
+              }}
               disabled={isImporting}
           />
           <span>flex 를 Auto Layout 으로 변환 (브라우저 배치와 같을 때만)</span>
         </label>
+        <label className="option">
+          <input
+              id="opt-into-selection"
+              type="checkbox"
+              checked={intoSelection}
+              onChange={(e) => {
+                setIntoSelection(e.target.checked);
+                saveSettings({intoSelection: e.target.checked});
+              }}
+              disabled={isImporting}
+          />
+          <span>선택한 프레임 안에 넣기</span>
+        </label>
 
         {/* HTML 입력 */}
-        <div className="textarea-wrap">
+        <div
+            className={`textarea-wrap ${dragging ? 'dragging' : ''}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              void loadFile(e.dataTransfer.files?.[0]);
+            }}
+        >
         <textarea
             className="textarea"
-            placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.`}
+            placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.\n.html 파일을 끌어다 놓아도 됩니다.`}
             value={html}
             onChange={(e) => setHtml(e.target.value)}
             disabled={isImporting}
@@ -166,7 +265,7 @@ export default function App() {
         {isImporting && (
             <div className="status-row">
               <div className="spinner"/>
-              <span className="status-text">{STATUS_LABEL[status]}</span>
+              <span className="status-text">{STATUS_LABEL[status]}{progress}</span>
             </div>
         )}
 

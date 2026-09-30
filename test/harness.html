@@ -99,8 +99,37 @@
       waiter = null;
     }
     const created = page.children.filter((n) => !before.has(n));
-    const roots = target ? target.children : created;
-    return { roots: roots.map(__serializeNode), done };
+    return {
+      roots: created.map(__serializeNode),
+      selected: target ? target.children.map(__serializeNode) : [],
+      done,
+    };
+  };
+
+  /** UI 를 새로 띄운 뒤 복원된 입력·옵션을 읽는다 (clientStorage 는 메인 쪽 목에 남아 있다) */
+  window.reloadUiState = async () => {
+    ui.contentWindow.location.reload();
+    await sleep(200);
+    await uiReady();
+    await sleep(300);
+    const d = ui.contentDocument;
+    return {
+      html: d.querySelector('textarea').value,
+      width: d.querySelector('select').value,
+      autoLayout: !!d.getElementById('opt-autolayout')?.checked,
+      intoSelection: !!d.getElementById('opt-into-selection')?.checked,
+    };
+  };
+
+  /** .html 파일을 입력 영역에 끌어놓는다 */
+  window.dropFile = async (name, content) => {
+    const win = ui.contentWindow;
+    const d = ui.contentDocument;
+    const dt = new win.DataTransfer();
+    dt.items.add(new win.File([content], name, { type: 'text/html' }));
+    d.querySelector('.textarea-wrap').dispatchEvent(new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    await sleep(200);
+    return { html: d.querySelector('textarea').value };
   };
 </script>
 </body>
