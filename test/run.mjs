@@ -9,6 +9,8 @@
  *   node test/run.mjs                 # 전체
  *   node test/run.mjs --grep shadow   # id/제목 필터
  *   node test/run.mjs --dist <dir>    # 다른 빌드 결과물로 실행 (수정 전 빌드와 비교)
+ *   node test/run.mjs --grep br --dump  # 생성된 노드 트리를 요약 출력
+ *   node test/run.mjs --html page.html --width 375   # 임의 HTML 파일을 가져와 트리만 출력
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -26,6 +28,17 @@ const argOf = (name) => {
 };
 const distDir = path.resolve(argOf('--dist') || path.join(here, '..', 'dist'));
 const grep = argOf('--grep');
+const dump = args.includes('--dump');
+
+/** 노드 트리 요약: 종류·이름·위치·크기와 텍스트 속성 */
+function summarize(n, depth = 0, out = []) {
+  const r = (v) => Math.round(v * 10) / 10;
+  let line = `${'  '.repeat(depth)}${n.type} "${n.name}" (${r(n.x)},${r(n.y)} ${r(n.width)}x${r(n.height)})`;
+  if (n.type === 'TEXT') line += ` ${JSON.stringify(n.characters)} ${n.textAutoResize} ${n.textAlignHorizontal} ${n.fontName.family}/${n.fontName.style}`;
+  out.push(line);
+  for (const c of n.children || []) summarize(c, depth + 1, out);
+  return out.join('\n');
+}
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
 const server = http.createServer((req, res) => {
@@ -44,7 +57,16 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-const selected = cases.filter((c) => !grep || c.id.includes(grep) || c.title.includes(grep));
+const htmlFile = argOf('--html');
+const selected = htmlFile
+  ? [{
+    id: path.basename(htmlFile),
+    title: '임의 HTML 가져오기',
+    width: Number(argOf('--width') || 1440),
+    html: fs.readFileSync(htmlFile, 'utf8'),
+    check: (res) => console.log(res.roots.map((r) => summarize(r)).join('\n')),
+  }]
+  : cases.filter((c) => !grep || c.id.includes(grep) || c.title.includes(grep));
 // 설치된 Chrome 을 우선 사용하고, 없으면 Playwright 브라우저(npx playwright install chromium)로 실행
 const browser = await chromium
   .launch({ channel: 'chrome', headless: true })
@@ -73,6 +95,7 @@ for (const c of selected) {
     for (const { html, width, theme, options, selectFrame } of steps) {
       res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame });
     }
+    if (dump) console.log(res.roots.map((r) => summarize(r)).join('\n'));
     c.check({ ...res, root: res.roots[0] }, t);
   } catch (e) {
     error = String(e && e.message ? e.message : e).split('\n')[0];
