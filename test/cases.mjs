@@ -1344,4 +1344,11 @@ export const cases = [
       t.eq(n?.strokeWeight, 1, 'stroke weight');
     },
   },
+  {
+    id: 'image-grayscale',
+    title: 'filter:grayscale() 이미지는 채도를 뺀 이미지 필터로 들어간다',
+    width: 375,
+    html: `<div><img src="${PNG_1PX}" style="display:block;width:40px;height:40px;filter:grayscale(1)"></div>`,
+    check: ({ root }, t) => t.eq(imageFill(find(root, (n) => n.type === 'RECTANGLE'))?.filters?.saturation, -1, 'saturation'),
+  },
 ];

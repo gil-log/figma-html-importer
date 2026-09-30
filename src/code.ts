@@ -642,7 +642,7 @@ function backgroundPaints(s: DomStyleData, w: number, h: number): Paint[] {
       const paint = parseLinearGradient(layer, w, h) ??
         parseRadialGradient(layer, w, h) ??
         parseConicGradient(layer, w, h) ??
-        backgroundImagePaint(layer, sizes[i % sizes.length], repeats[i % repeats.length]);
+        backgroundImagePaint(layer, sizes[i % sizes.length], repeats[i % repeats.length], s.filter);
       if (paint) layerPaints.push(paint);
     });
     paints.push(...layerPaints.reverse());
@@ -673,6 +673,24 @@ function imageHash(url: string | undefined): string | null {
   return hash;
 }
 
+/**
+ * filter 의 색 보정 함수 → Figma 이미지 필터 (이미지 fill 에만 적용된다).
+ * grayscale(a) → 채도 -a, saturate(s) → 채도 s-1, contrast(c) → 대비 c-1, brightness(b) → 노출 b-1 (-1~1 로 제한)
+ */
+function imageFilters(filter: string | undefined): ImageFilters | undefined {
+  if (!filter || filter === 'none') return undefined;
+  const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+  const out: { saturation?: number; contrast?: number; exposure?: number } = {};
+  for (const m of filter.matchAll(/(grayscale|saturate|contrast|brightness)\(\s*([\d.]+)(%?)\s*\)/g)) {
+    const v = parseFloat(m[2]) / (m[3] ? 100 : 1);
+    if (m[1] === 'grayscale') out.saturation = clamp((out.saturation ?? 0) - Math.min(v, 1));
+    if (m[1] === 'saturate') out.saturation = clamp((out.saturation ?? 0) + v - 1);
+    if (m[1] === 'contrast') out.contrast = clamp(v - 1);
+    if (m[1] === 'brightness') out.exposure = clamp(v - 1);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** object-fit → scaleMode. contain 류는 FIT, 나머지(cover·fill·none)는 FILL */
 function objectFitScaleMode(fit: string | undefined): 'FILL' | 'FIT' {
   return fit === 'contain' || fit === 'scale-down' ? 'FIT' : 'FILL';
@@ -682,7 +700,13 @@ function objectFitScaleMode(fit: string | undefined): 'FILL' | 'FIT' {
  * background-image: url(...) 레이어 → 이미지 fill.
  * cover → FILL, contain → FIT, 반복되는 원본 크기/px 크기 → TILE, 그 외(100% 100% 등) → FILL
  */
-function backgroundImagePaint(layer: string, size: string, repeat: string): ImagePaint | null {
+function backgroundImagePaint(layer: string, size: string, repeat: string, filter?: string): ImagePaint | null {
+  const paint = backgroundImagePaintBase(layer, size, repeat);
+  const filters = imageFilters(filter);
+  return paint && filters ? { ...paint, filters } : paint;
+}
+
+function backgroundImagePaintBase(layer: string, size: string, repeat: string): ImagePaint | null {
   const m = layer.trim().match(/^url\(\s*["']?([^"')]+)["']?\s*\)$/);
   if (!m) return null;
   const hash = imageHash(m[1]);
@@ -1382,8 +1406,9 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     const hash = imageHash(imageUrl);
     imgRect.name = hash ? node.name ?? tagName : `${node.name ?? tagName} (placeholder)`;
     imgRect.resize(w, h);
+    const filters = imageFilters(style.filter);
     imgRect.fills = hash
-      ? [{ type: 'IMAGE', imageHash: hash, scaleMode: objectFitScaleMode(style.objectFit) }]
+      ? [{ type: 'IMAGE', imageHash: hash, scaleMode: objectFitScaleMode(style.objectFit), ...(filters ? { filters } : {}) }]
       : [{ type: 'SOLID', color: { r: 0.88, g: 0.9, b: 0.92 } }];
     applyCornerRadius(imgRect, style);
     applyEffects(imgRect, style);
