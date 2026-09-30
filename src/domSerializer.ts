@@ -155,7 +155,8 @@ function extractStyle(cs: CSSStyleDeclaration): DomStyleData {
     borderLeftWidth: pf(cs.borderLeftWidth),
     borderColor: effectiveBorderColor(cs),
     borderStyle: effectiveBorderStyle(cs),
-    opacity: pf(cs.opacity) || 1,
+    // opacity:0 도 그대로 살려야 하므로 pf() || 1 로 쓰지 않는다
+    opacity: cs.opacity === '' ? 1 : parseFloat(cs.opacity),
     boxShadow: cs.boxShadow,
     overflow: cs.overflow,
     display: cs.display,

@@ -691,7 +691,8 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       } else {
         t.x = Math.round(rect.x + rect.width - t.width);
       }
-      if (!visible) t.visible = false;
+      if (style.opacity < 1) t.opacity = style.opacity;
+    if (!visible) t.visible = false;
       parent.appendChild(t);
       textCount++;
       return;
@@ -707,7 +708,8 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       // 브라우저에서 텍스트가 줄바꿈됨 → 요소 폭을 고정폭으로 사용하여 줄바꿈 보존
       const t = makeText(rect.x, rect.y, w);
       await applyBoldSegments(t);
-      if (!visible) t.visible = false;
+      if (style.opacity < 1) t.opacity = style.opacity;
+    if (!visible) t.visible = false;
       parent.appendChild(t);
       textCount++;
       return;
@@ -717,7 +719,8 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
       // 한 줄 텍스트: WIDTH_AND_HEIGHT → 줄바꿈 방지
       const t = makeText(rect.x, rect.y, 0);
       await applyBoldSegments(t);
-      if (!visible) t.visible = false;
+      if (style.opacity < 1) t.opacity = style.opacity;
+    if (!visible) t.visible = false;
       parent.appendChild(t);
       textCount++;
       return;
@@ -726,6 +729,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     const fixedW = isBlockDisplay ? calcFixedWidth(w) : 0;
     const t = makeText(rect.x, rect.y, fixedW);
     await applyBoldSegments(t);
+    if (style.opacity < 1) t.opacity = style.opacity;
     if (!visible) t.visible = false;
     parent.appendChild(t);
     textCount++;
@@ -776,6 +780,7 @@ async function buildTree(node: DomNodeData, parent: FrameNode): Promise<void> {
     imgRect.fills = [{ type: 'SOLID', color: { r: 0.88, g: 0.9, b: 0.92 } }];
     applyCornerRadius(imgRect, style);
     applyEffects(imgRect, style);
+    if (style.opacity < 1) imgRect.opacity = style.opacity;
     imgRect.x = rect.x;
     imgRect.y = rect.y;
     if (!visible) imgRect.visible = false;
