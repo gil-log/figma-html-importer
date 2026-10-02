@@ -135,6 +135,59 @@ body {
   border-style: dashed;
 }
 
+.design-card {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--figma-color-border, #e0e0e0);
+  border-radius: 6px;
+  background: var(--figma-color-bg-secondary, #f8f8f8);
+  color: var(--figma-color-text, #1a1a1a);
+}
+.textarea-wrap.dragging .design-card {
+  border-color: var(--figma-color-border-selected, #0d99ff);
+  border-style: dashed;
+}
+.design-card-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.design-card-file {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--figma-color-text-secondary, #666);
+  word-break: break-all;
+}
+.design-card-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.design-card-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+.design-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.design-card-note {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--figma-color-text-secondary, #666);
+}
+.design-card-size {
+  flex-shrink: 0;
+  color: var(--figma-color-text-secondary, #666);
+  font-variant-numeric: tabular-nums;
+}
 .textarea:focus {
   border-color: var(--figma-color-border-selected, #0d99ff);
 }

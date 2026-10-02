@@ -56,3 +56,63 @@ export function gradientHandles(paint) {
   const ap = ([x, y]) => [inv[0][0] * x + inv[0][1] * y + inv[0][2], inv[1][0] * x + inv[1][1] * y + inv[1][2]];
   return { start: ap([0, 0.5]), end: ap([1, 0.5]), yEdge: ap([0.5, 1]), center: ap([0.5, 0.5]) };
 }
+
+// ─── zip 만들기 (Claude 디자인 내보내기 흉내) ─────────────────────
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * 파일 표({경로: 문자열|Buffer})로 zip 을 만들어 base64 로 돌려준다.
+ * deflate: true 면 압축(방식 8), 아니면 저장(방식 0) — Claude 디자인 내보내기는 저장 방식이다.
+ */
+export async function makeZipBase64(files, { deflate = false } = {}) {
+  const { deflateRawSync } = await import('node:zlib');
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const raw = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+    const data = deflate ? deflateRawSync(raw) : raw;
+    const crc = crc32(raw);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(deflate ? 8 : 0, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(raw.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    locals.push(local, nameBuf, data);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(deflate ? 8 : 0, 10);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(raw.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  }
+  const centralSize = centrals.reduce((n, b) => n + b.length, 0);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(Object.keys(files).length, 8);
+  eocd.writeUInt16LE(Object.keys(files).length, 10);
+  eocd.writeUInt32LE(centralSize, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, eocd]).toString('base64');
+}

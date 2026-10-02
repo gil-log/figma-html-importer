@@ -3,7 +3,7 @@
  * check(result, t): result.root = 생성된 루트 노드(JSON), result.roots = 전체 루트, result.done = 완료 메시지
  */
 import fs from 'node:fs';
-import { find, all, findText, findTextIncl, texts, solid, hasSolid, gradientHandles } from './helpers.mjs';
+import { find, all, findText, findTextIncl, texts, solid, hasSolid, gradientHandles, makeZipBase64 } from './helpers.mjs';
 
 const TW = '<script src="https://cdn.tailwindcss.com"></script>';
 const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
@@ -12,6 +12,86 @@ const SVG_IMG = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http:
 const imageFill = (n) => (n?.fills || []).find((f) => f.type === 'IMAGE');
 const frameBy = (root, pred) => find(root, (n) => n.type === 'FRAME' && pred(n));
 const solidFrame = (root, rgb) => frameBy(root, (n) => hasSolid(n, rgb));
+
+// ── Claude 디자인 내보내기 흉내: <x-dc> 템플릿 + 런타임(support.js) + 디자인 시스템 번들 ──
+// 가짜 런타임은 실제 런타임처럼 <x-dc> 를 #dc-root 로 바꾸고, DOM 이 조용해지는 기본 대기(120ms)보다 늦게 그린다.
+const FAKE_RUNTIME = `(function () {
+  function boot() {
+    var tpl = document.querySelector('x-dc');
+    var root = document.createElement('div');
+    root.id = 'dc-root';
+    var html = tpl.innerHTML.replace(/<helmet>[\\s\\S]*?<\\/helmet>/, '');
+    tpl.replaceWith(root);
+    setTimeout(function () {
+      var res = window.__resources;
+      root.innerHTML = html;
+      root.firstElementChild.insertAdjacentHTML('beforeend', res ? '<p style="margin:0">옆 화면 ' + Object.keys(res).length + '개</p>' : '<p>자원표 없음</p>');
+      root.querySelectorAll('x-import').forEach(function (el) {
+        var fn = el.getAttribute('component-from-global-scope').split('.').reduce(function (o, k) { return o && o[k]; }, window);
+        el.replaceWith(fn({ label: el.getAttribute('label') }));
+      });
+    }, 400);
+  }
+  document.readyState !== 'loading' ? boot() : document.addEventListener('DOMContentLoaded', boot);
+})();`;
+const FAKE_REACT = 'window.FakeReact = { ok: true };';
+// 번들은 React 뒤에 불러야 한다 (순서가 틀리면 배지 글자에 표시가 붙는다)
+const FAKE_BUNDLE_JS = `window.Demo = { Badge: function (p) {
+  var s = document.createElement('span');
+  s.className = 'demo-badge';
+  s.textContent = p.label + (window.FakeReact ? '' : ' (React 없음)');
+  return s;
+} };`;
+const FAKE_BUNDLE_CSS = '.demo-badge{display:inline-block;align-self:flex-start;padding:4px 10px;background:#132029;color:#fff;border-radius:100px;font-size:12px}' +
+  '.demo-dot{width:20px;height:20px;background-image:url(../img/dot.png);background-size:cover}';
+const dcBoard = (title, w, h, body) => `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<script src="./vendor/react.js"></script>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/demo/components/bundle.css">
+<script src="ds/demo/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>body{margin:0}</style></helmet>
+<div style="width: ${w}px; height: ${h}px; background: #ffffff; display: flex; flex-direction: column; gap: 12px; padding: 16px; box-sizing: border-box;">
+${body}
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":${w},"height":${h}}}'>
+class Component extends DCLogic {}
+</script>
+</body>
+</html>`;
+const MAIN_BOARD = dcBoard('가짜 캔버스 화면', 360, 640,
+  '<h1 style="margin: 0; font-size: 20px;">정적 제목</h1>\n<x-import component-from-global-scope="Demo.Badge" label="런타임 배지"></x-import>\n<div class="demo-dot"></div>');
+const SECOND_BOARD = dcBoard('두 번째 화면', 375, 300, '<p style="margin: 0;">둘째 본문</p>');
+const exportFiles = (prefix = '') => ({
+  [`${prefix}support.js`]: FAKE_RUNTIME,
+  [`${prefix}vendor/react.js`]: FAKE_REACT,
+  [`${prefix}ds/demo/components/bundle.js`]: FAKE_BUNDLE_JS,
+  [`${prefix}ds/demo/components/bundle.css`]: FAKE_BUNDLE_CSS,
+  [`${prefix}ds/demo/img/dot.png`]: Buffer.from(PNG_1PX.split(',')[1], 'base64'),
+  [`${prefix}README.md`]: '# export',
+});
+const DESIGN_ZIP = await makeZipBase64({ 'Main.dc.html': MAIN_BOARD, ...exportFiles() });
+const DESIGN_ZIP_MULTI = await makeZipBase64({
+  'export/Main.dc.html': MAIN_BOARD,
+  'export/Second.dc.html': SECOND_BOARD,
+  '__MACOSX/export/._Main.dc.html': 'junk',
+  'export/.DS_Store': 'junk',
+  ...exportFiles('export/'),
+}, { deflate: true });
+const DESIGN_ZIP_EMPTY = await makeZipBase64({ 'README.md': '# 화면 없음' });
+// 자원을 이미 본문에 넣은 캔버스 화면 (런타임이 늦게 그려도 기다려야 한다)
+const MAIN_BOARD_INLINED = MAIN_BOARD
+  .replace('<script src="./vendor/react.js"></script>', `<script>${FAKE_REACT}</script>`)
+  .replace('<script src="./support.js"></script>', `<script>window.__resources = {};${FAKE_RUNTIME}</script>`)
+  .replace('<link rel="stylesheet" href="ds/demo/components/bundle.css">', `<style>${FAKE_BUNDLE_CSS}</style>`)
+  .replace('<script src="ds/demo/components/bundle.js"></script>', `<script>${FAKE_BUNDLE_JS}</script>`);
 
 export const cases = [
   // ── 폰트 굵기 ──────────────────────────────────────────────
@@ -1468,6 +1548,69 @@ export const cases = [
     width: 375,
     html: '<div><div class="-z-10 -top-3" style="height:10px"></div><svg data-lucide="calendar" class="lucide" width="10" height="10"><rect width="10" height="10"/></svg></div>',
     check: ({ root }, t) => t.eq(root.children.map((c) => c.name), ['div', 'icon · calendar'], 'names'),
+  },
+  // ── Claude 디자인 화면 ────────────────────────────────────
+  {
+    id: 'design-zip-runtime',
+    title: 'Claude 디자인에서 내려받은 zip 을 열면 런타임이 그린 컴포넌트까지 화면에 지정된 크기로 들어간다',
+    width: 1440,
+    file: { name: '02 작성 중-html.zip', base64: DESIGN_ZIP },
+    check: ({ roots, root, done }, t) => {
+      t.eq(roots.length, 1, 'roots');
+      if (!root) return;
+      t.eq(root.name, '가짜 캔버스 화면', 'root name = 문서 제목');
+      t.near(root.width, 360, 0.5, 'width = $preview (렌더 폭 1440 이 아니라)');
+      t.near(root.height, 640, 0.5, 'height');
+      t.ok(findText(root, '정적 제목'), 'static text');
+      t.ok(findText(root, '런타임 배지'), `runtime component: ${JSON.stringify(texts(root).map((x) => x.characters))}`);
+      t.ok(findText(root, '옆 화면 0개'), 'runtime resource table set');
+      const badge = find(root, (n) => n.type === 'FRAME' && hasSolid(n, [19, 32, 41]));
+      t.ok(badge, 'badge background from inlined bundle.css');
+      t.ok(find(root, (n) => n.width === 20 && n.height === 20 && imageFill(n)), 'CSS url() image from zip');
+      t.eq(done?.failedCount, 0, 'no failures');
+    },
+  },
+  {
+    id: 'design-zip-multi',
+    title: 'zip 에 화면이 여러 장이면 각각 제 이름의 프레임으로 나란히 들어간다 (폴더째 압축·압축 방식·Mac 찌꺼기 무시)',
+    file: { name: 'export.zip', base64: DESIGN_ZIP_MULTI },
+    check: ({ roots }, t) => {
+      t.eq(roots.map((r) => r.name), ['가짜 캔버스 화면', '두 번째 화면'], 'names (폭 접미사 없음)');
+      if (roots.length !== 2) return;
+      t.near(roots[0].width, 360, 0.5, 'first width');
+      t.near(roots[1].width, 375, 0.5, 'second width');
+      t.ok(roots[1].x >= roots[0].x + roots[0].width, 'side by side');
+      t.ok(findText(roots[0], '런타임 배지') && findText(roots[1], '둘째 본문'), 'both rendered');
+      t.ok(findText(roots[0], '옆 화면 1개'), 'sibling board in resource table');
+    },
+  },
+  {
+    id: 'design-dc-pasted-guide',
+    title: '런타임 없이 .dc.html 만 붙여넣으면 내려받은 zip 을 열라고 안내한다',
+    width: 375,
+    expectError: true,
+    html: MAIN_BOARD,
+    check: ({ uiError, roots }, t) => {
+      t.ok(uiError?.includes('zip'), `guide: ${uiError}`);
+      t.eq(roots.length, 0, 'nothing imported');
+    },
+  },
+  {
+    id: 'design-zip-no-artboard',
+    title: '화면(.dc.html)이 없는 zip 은 그 사실을 알린다',
+    expectError: true,
+    file: { name: 'other.zip', base64: DESIGN_ZIP_EMPTY },
+    check: ({ uiError }, t) => t.ok(uiError?.includes('.dc.html'), `message: ${uiError}`),
+  },
+  {
+    id: 'design-inline-waits-runtime',
+    title: '자원을 본문에 넣은 캔버스 화면은 런타임이 늦게 그려도 다 그린 뒤에 가져온다',
+    width: 375,
+    html: MAIN_BOARD_INLINED,
+    check: ({ root }, t) => {
+      t.ok(findText(root, '런타임 배지'), `runtime component: ${JSON.stringify(texts(root).map((x) => x.characters))}`);
+      t.ok(findText(root, '정적 제목'), 'static text');
+    },
   },
   {
     id: 'dom-order-without-overlap',

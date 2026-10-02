@@ -6,6 +6,8 @@
  * 브라우저가 일반 페이지처럼 <head>·스크립트·스타일을 순서대로 처리하게 한다.
  */
 
+import { waitForDesignRuntime } from './designExport';
+
 export interface Viewport {
   width: number;
   height: number;
@@ -87,6 +89,8 @@ export async function renderHtml(html: string, viewport: Viewport): Promise<Rend
     throw new Error('HTML 렌더링용 문서를 만들지 못했습니다.');
   }
 
+  // Claude 디자인 화면은 런타임이 #dc-root 에 그려 넣을 때까지 기다린다 (DOM 이 잠시 조용해도 아직 안 그려졌을 수 있다)
+  await waitForDesignRuntime(doc, 10000);
   // 레이아웃을 한 번 강제해 웹폰트 로딩을 시작시킨 뒤 폰트·스크립트·Tailwind 처리를 기다린다
   void doc.documentElement.offsetHeight;
   await withTimeout(doc.fonts.ready, 3000);

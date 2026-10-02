@@ -1499,11 +1499,14 @@ function contentExtent(frame: FrameNode): { right: number; bottom: number } {
 // ─── 메시지 핸들러 ────────────────────────────────────────────
 
 /** 루트 프레임 하나 생성 (위치는 호출한 쪽에서 정한다) */
-async function buildRoot(page: ImportPage, target: BaseNode & ChildrenMixin, multi: boolean): Promise<FrameNode> {
+const rootBaseName = (page: ImportPage) => page.title?.trim() || page.data.name || 'HTML Import';
+
+/** suffixWidth: 같은 이름의 루트가 여럿일 때(여러 폭 가져오기) 이름 뒤에 폭을 붙여 구분한다 */
+async function buildRoot(page: ImportPage, target: BaseNode & ChildrenMixin, suffixWidth: boolean): Promise<FrameNode> {
   const data = page.data;
   const rootFrame = figma.createFrame();
-  const baseName = page.title?.trim() || data.name || 'HTML Import';
-  rootFrame.name = multi ? `${baseName} · ${page.width}` : baseName;
+  const baseName = rootBaseName(page);
+  rootFrame.name = suffixWidth ? `${baseName} · ${page.width}` : baseName;
   rootFrame.resize(Math.max(data.rect.width, 1), Math.max(data.rect.height, 1));
   target.appendChild(rootFrame);
 
@@ -1573,12 +1576,12 @@ figma.ui.onmessage = async function (msg: UIToMainMessage) {
 
   try {
     const target = resolveTarget();
-    const multi = msg.pages.length > 1;
     const roots: FrameNode[] = [];
     for (const page of msg.pages) {
       imageAssets = page.images ?? {};
-      const root = await buildRoot(page, target, multi);
-      // 페이지에 넣을 때는 뷰포트 중앙, 선택한 프레임 안이면 왼쪽 위부터. 여러 폭은 오른쪽으로 나란히
+      const sameName = msg.pages.filter((p) => rootBaseName(p) === rootBaseName(page)).length > 1;
+      const root = await buildRoot(page, target, sameName);
+      // 페이지에 넣을 때는 뷰포트 중앙, 선택한 프레임 안이면 왼쪽 위부터. 여러 폭·여러 화면은 오른쪽으로 나란히
       const prev = roots[roots.length - 1];
       if (prev) {
         root.x = prev.x + prev.width + ROOT_GAP;

@@ -3,6 +3,8 @@ import {serializeDom} from '../domSerializer';
 import type {DomNodeData, ImportPage, MainToUIMessage, PluginSettings} from '../types';
 import {canvasBackground, findRenderRoot, prepareForCapture, renderHtml} from './render';
 import {collectImageUrls, loadImages, type ImageCache} from './images';
+import {isZip, unzip} from './zip';
+import {needsDesignExport, readDesignExport, type DesignArtboard} from './designExport';
 
 // 렌더 폭별 뷰포트 높이 (vh 단위·position:fixed 기준)
 const WIDTH_OPTIONS = [
@@ -35,6 +37,15 @@ const MAX_SAVED_HTML = 500_000;
 
 const post = (pluginMessage: unknown) => parent.postMessage({pluginMessage}, '*');
 
+const DESIGN_ZIP_GUIDE =
+    'Claude 디자인 화면(.dc.html)은 같이 내려받은 런타임이 있어야 그려집니다. ' +
+    '캔버스에서 내려받은 zip 파일을 압축을 풀지 말고 그대로 열거나 끌어다 놓아 주세요.';
+
+interface LoadedDesign {
+  fileName: string;
+  boards: DesignArtboard[];
+}
+
 export default function App() {
   const [html, setHtml] = useState('');
   const [renderWidth, setRenderWidth] = useState<RenderWidth>(1440);
@@ -47,6 +58,7 @@ export default function App() {
   } | null>(null);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [design, setDesign] = useState<LoadedDesign | null>(null);
   const htmlRef = useRef(html);
   htmlRef.current = html;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -92,47 +104,73 @@ export default function App() {
     post({type: 'save-settings', settings});
   };
 
+  /** HTML 한 장을 렌더 폭×높이 iframe 에서 그려 직렬화한다 */
+  const capturePage = async (
+      source: string, viewport: {width: number; height: number}, imageCache: ImageCache, title?: string,
+  ): Promise<ImportPage> => {
+    setStatus('rendering');
+    // ── 1. 렌더 폭×높이 iframe 에서 렌더링 (스크립트·Tailwind·웹폰트 처리 대기 포함) ──
+    const rendered = await renderHtml(source, viewport);
+    try {
+      const {doc, win} = rendered;
+      setStatus('parsing');
+      prepareForCapture(doc, win);
+
+      // ── 2. 루트 결정 후 직렬화 ────────────────────────────
+      const {root, page} = findRenderRoot(doc, win);
+      const domData = serializeDom(root, root.getBoundingClientRect());
+      if (!domData) throw new Error(
+          `<${root.tagName.toLowerCase()}> 요소 크기가 0입니다.\n` +
+          '콘텐츠가 없거나 스타일이 적용되지 않은 요소입니다.'
+      );
+
+      // ── 3. 루트 배경: 페이지면 캔버스 배경(html → body 전파), 없으면 브라우저처럼 흰색 ──
+      if (page) applyCanvasBackground(domData, canvasBackground(doc, win));
+      if (!hasBackground(domData)) domData.style.backgroundColor = WHITE;
+
+      // ── 4. 참조된 이미지를 바이트로 받아 함께 보낸다 (못 받은 것은 자리표시) ──
+      setStatus('images');
+      const images = await loadImages(collectImageUrls(domData), imageCache);
+      return {data: domData, images, title: title ?? doc.title, width: viewport.width};
+    } finally {
+      rendered.dispose();
+    }
+  };
+
   const handleImport = useCallback(async () => {
-    if (!html.trim()) return;
+    if (!design && !html.trim()) return;
+    if (!design && needsDesignExport(html)) {
+      setStatus('error');
+      setError(DESIGN_ZIP_GUIDE);
+      return;
+    }
 
     setStatus('rendering');
     setError('');
     setResult(null);
     saveSettings({});
 
-    const widths = renderWidth === 'multi' ? MULTI_WIDTHS : [renderWidth];
     const pages: ImportPage[] = [];
     const imageCache: ImageCache = new Map();
     try {
-      for (const [i, width] of widths.entries()) {
-        setProgress(widths.length > 1 ? ` (${width}px · ${i + 1}/${widths.length})` : '');
-        const option = WIDTH_OPTIONS.find((o) => o.value === width) ?? WIDTH_OPTIONS[2];
-        setStatus('rendering');
-        // ── 1. 렌더 폭×높이 iframe 에서 렌더링 (스크립트·Tailwind·웹폰트 처리 대기 포함) ──
-        const rendered = await renderHtml(html, {width: option.value, height: option.height});
-        try {
-          const {doc, win} = rendered;
-          setStatus('parsing');
-          prepareForCapture(doc, win);
-
-          // ── 2. 루트 결정 후 직렬화 ────────────────────────────
-          const {root, page} = findRenderRoot(doc, win);
-          const domData = serializeDom(root, root.getBoundingClientRect());
-          if (!domData) throw new Error(
-              `<${root.tagName.toLowerCase()}> 요소 크기가 0입니다.\n` +
-              '콘텐츠가 없거나 스타일이 적용되지 않은 요소입니다.'
-          );
-
-          // ── 3. 루트 배경: 페이지면 캔버스 배경(html → body 전파), 없으면 브라우저처럼 흰색 ──
-          if (page) applyCanvasBackground(domData, canvasBackground(doc, win));
-          if (!hasBackground(domData)) domData.style.backgroundColor = WHITE;
-
-          // ── 4. 참조된 이미지를 바이트로 받아 함께 보낸다 (못 받은 것은 자리표시) ──
-          setStatus('images');
-          const images = await loadImages(collectImageUrls(domData), imageCache);
-          pages.push({data: domData, images, title: doc.title, width: option.value});
-        } finally {
-          rendered.dispose();
+      if (design) {
+        // Claude 디자인 화면: 화면마다 지정된 크기($preview)로 그려 나란히 놓는다
+        const fallback = WIDTH_OPTIONS.find((o) => o.value === renderWidth) ?? WIDTH_OPTIONS[0];
+        const titleCount = new Map<string, number>();
+        for (const b of design.boards) titleCount.set(b.title, (titleCount.get(b.title) ?? 0) + 1);
+        for (const [i, board] of design.boards.entries()) {
+          setProgress(design.boards.length > 1 ? ` (${i + 1}/${design.boards.length})` : '');
+          const viewport = {width: board.width ?? fallback.value, height: board.height ?? fallback.height};
+          const name = board.path.slice(board.path.lastIndexOf('/') + 1).replace(/\.dc\.html?$/i, '');
+          const title = (titleCount.get(board.title) ?? 0) > 1 ? `${board.title} (${name})` : board.title;
+          pages.push(await capturePage(board.html, viewport, imageCache, title));
+        }
+      } else {
+        const widths = renderWidth === 'multi' ? MULTI_WIDTHS : [renderWidth];
+        for (const [i, width] of widths.entries()) {
+          setProgress(widths.length > 1 ? ` (${width}px · ${i + 1}/${widths.length})` : '');
+          const option = WIDTH_OPTIONS.find((o) => o.value === width) ?? WIDTH_OPTIONS[2];
+          pages.push(await capturePage(html, {width: option.value, height: option.height}, imageCache));
         }
       }
 
@@ -143,26 +181,42 @@ export default function App() {
       setStatus('error');
       setError(e.message ?? String(e));
     }
-  }, [html, renderWidth, autoLayout, intoSelection]);
+  }, [html, design, renderWidth, autoLayout, intoSelection]);
 
   const handleReset = () => {
     setStatus('idle');
     setResult(null);
     setError('');
-    setHtml('');
+    if (design) setDesign(null);
+    else setHtml('');
   };
 
-  /** .html 파일 열기·끌어놓기 */
+  /** .html 파일 또는 Claude 디자인 zip 열기·끌어놓기 */
   const loadFile = async (file: File | undefined) => {
     if (!file) return;
-    setHtml(await file.text());
     setStatus('idle');
     setResult(null);
     setError('');
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (isZip(bytes)) {
+        const boards = readDesignExport(await unzip(bytes));
+        if (boards.length === 0) throw new Error('zip 안에 Claude 디자인 화면(.dc.html)이 없습니다.');
+        setDesign({fileName: file.name, boards});
+        return;
+      }
+      const text = new TextDecoder('utf-8').decode(bytes);
+      if (needsDesignExport(text)) throw new Error(DESIGN_ZIP_GUIDE);
+      setDesign(null);
+      setHtml(text);
+    } catch (e: any) {
+      setStatus('error');
+      setError(e.message ?? String(e));
+    }
   };
 
   const isImporting = status === 'rendering' || status === 'parsing' || status === 'images' || status === 'building';
-  const canImport = !isImporting && html.trim().length > 0;
+  const canImport = !isImporting && (!!design || html.trim().length > 0);
 
   return (
       <div className="root">
@@ -178,14 +232,14 @@ export default function App() {
               className="file-btn"
               onClick={() => fileInputRef.current?.click()}
               disabled={isImporting}
-              title="HTML 파일 열기"
+              title="HTML 파일 또는 Claude 디자인 zip 열기"
           >
             파일 열기
           </button>
           <input
               ref={fileInputRef}
               type="file"
-              accept=".html,.htm,text/html"
+              accept=".html,.htm,.zip,text/html,application/zip"
               hidden
               onChange={(e) => {
                 void loadFile(e.target.files?.[0]);
@@ -205,7 +259,8 @@ export default function App() {
                 setRenderWidth(v);
                 saveSettings({renderWidth: v});
               }}
-              disabled={isImporting}
+              disabled={isImporting || !!design}
+              title={design ? 'Claude 디자인 화면은 화면에 지정된 크기로 가져옵니다' : undefined}
           >
             {WIDTH_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -256,22 +311,40 @@ export default function App() {
               void loadFile(e.dataTransfer.files?.[0]);
             }}
         >
-        <textarea
-            className="textarea"
-            placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.\n.html 파일을 끌어다 놓아도 됩니다. ⌘/Ctrl + Enter 로 가져오기`}
-            value={html}
-            onChange={(e) => setHtml(e.target.value)}
-            onKeyDown={(e) => {
-              // ⌘/Ctrl + Enter 로 바로 가져오기
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                if (canImport) void handleImport();
-              }
-            }}
-            disabled={isImporting}
-            spellCheck={false}
-        />
-          {html && !isImporting && (
+          {design ? (
+              <div className="design-card">
+                <div className="design-card-title">Claude 디자인 화면 {design.boards.length}장</div>
+                <div className="design-card-file">{design.fileName}</div>
+                <ul className="design-card-list">
+                  {design.boards.map((b) => (
+                      <li key={b.path}>
+                        <span className="design-card-name">{b.title}</span>
+                        <span className="design-card-size">
+                          {b.width && b.height ? `${b.width} × ${b.height}` : '크기 미지정'}
+                        </span>
+                      </li>
+                  ))}
+                </ul>
+                <div className="design-card-note">렌더 너비 설정 대신 화면마다 지정된 크기로 가져옵니다.</div>
+              </div>
+          ) : (
+              <textarea
+                  className="textarea"
+                  placeholder={`전체 HTML 문서 또는 일부 fragment 모두 지원합니다.\n<style> 태그 포함 시 스타일도 적용됩니다.\n.html 파일이나 Claude 디자인에서 내려받은 zip 을 끌어다 놓아도 됩니다.\n⌘/Ctrl + Enter 로 가져오기`}
+                  value={html}
+                  onChange={(e) => setHtml(e.target.value)}
+                  onKeyDown={(e) => {
+                    // ⌘/Ctrl + Enter 로 바로 가져오기
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      if (canImport) void handleImport();
+                    }
+                  }}
+                  disabled={isImporting}
+                  spellCheck={false}
+              />
+          )}
+          {(html || design) && !isImporting && (
               <button className="clear-btn" onClick={handleReset} title="지우기">
                 ✕
               </button>

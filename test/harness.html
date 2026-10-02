@@ -49,8 +49,24 @@
     return true;
   }
 
+  /** 바이너리 파일(zip 등)을 입력 영역에 끌어놓는다 */
+  async function dropBytes(name, base64) {
+    const win = ui.contentWindow;
+    const d = ui.contentDocument;
+    const bin = atob(base64);
+    const bytes = new win.Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const dt = new win.DataTransfer();
+    dt.items.add(new win.File([bytes], name, { type: 'application/zip' }));
+    d.querySelector('.textarea-wrap').dispatchEvent(new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    for (let i = 0; i < 100; i++) {
+      await sleep(50);
+      if (d.querySelector('.design-card') || d.querySelector('.error-box')) return;
+    }
+  }
+
   /**
-   * @param c { html, width, theme, options: { autoLayout, intoSelection }, selectFrame }
+   * @param c { html | file: { name, base64 }, width, theme, options: { autoLayout, intoSelection }, selectFrame, expectError }
    * @returns { roots, done, error }
    */
   window.runCase = async function (c) {
@@ -73,8 +89,17 @@
 
     window.__failText = c.failText || null;
     const logStart = __figmaLog.messages.length;
-    setValue(win, doc.querySelector('textarea'), c.html);
+    // 지난 케이스가 연 zip 카드가 남아 있으면 지운다
+    if (doc.querySelector('.design-card')) {
+      doc.querySelector('.clear-btn')?.click();
+      await sleep(30);
+    }
     setValue(win, doc.querySelector('select'), String(c.width || 1440));
+    if (c.file) await dropBytes(c.file.name, c.file.base64);
+    else setValue(win, doc.querySelector('textarea'), c.html);
+    if (c.file && c.expectError && doc.querySelector('.error-box')) {
+      return { roots: [], selected: [], uiError: doc.querySelector('.error-box').textContent, messages: [], uiText: doc.querySelector('.root').innerText };
+    }
     const opts = c.options || {};
     setChecked(win, 'opt-autolayout', !!opts.autoLayout);
     setChecked(win, 'opt-into-selection', !!opts.intoSelection);
@@ -87,8 +112,9 @@
         await sleep(50);
         if (finished) return new Promise(() => {});
         const box = doc.querySelector('.error-box');
+        if (box && c.expectError) return { uiError: box.textContent };
         if (box) throw new Error('UI error: ' + box.textContent);
-        if (!doc.querySelector('textarea')) throw new Error('UI crashed: ' + doc.body.innerText.slice(0, 300));
+        if (!doc.querySelector('.root')) throw new Error('UI crashed: ' + doc.body.innerText.slice(0, 300));
       }
       throw new Error('timeout');
     })();
@@ -107,6 +133,11 @@
     } finally {
       finished = true;
       waiter = null;
+    }
+    if (done && done.uiError !== undefined) {
+      window.__failText = null;
+      win.fetch = origFetch;
+      return { roots: [], selected: [], uiError: done.uiError, messages: [], uiText: doc.querySelector('.root').innerText };
     }
     const created = page.children.filter((n) => !before.has(n));
     window.__failText = null;

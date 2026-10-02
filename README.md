@@ -26,6 +26,11 @@ text nodes, and vectors.
 - **Page background** — `html`/`body` backgrounds (including `<body class="bg-...">`) fill the
   imported frame, following the CSS canvas background rules. Pages without a background get white,
   as in the browser.
+- **Claude Design exports** — open or drop the `.zip` downloaded from a Claude Design canvas as is.
+  Each screen (`*.dc.html`) is a template that the bundled runtime fills with design-system
+  components, so the plugin inlines the runtime, React, and design-system files from the zip,
+  waits until the runtime has drawn the screen, and imports every screen at the size set on its
+  artboard, side by side. Pasting a `.dc.html` on its own shows a hint to open the zip instead.
 
 ### Styles
 
@@ -143,8 +148,9 @@ text nodes, and vectors.
 
 ## How It Works
 
-1. **Paste HTML** — paste your markup into the text area, or open / drag-and-drop an `.html` file.
-   The last input, width, and options are remembered for the next run. ⌘/Ctrl + Enter imports.
+1. **Paste HTML** — paste your markup into the text area, or open / drag-and-drop an `.html` file
+   or a Claude Design `.zip`. The last input, width, and options are remembered for the next run.
+   ⌘/Ctrl + Enter imports.
 2. **Pick a render width** — select a viewport preset, or "375 · 768 · 1440 — 나란히" to import the
    mobile, tablet, and desktop layouts side by side in one go.
 3. **Pick options** — convert flex containers to Auto Layout, and/or place the result inside the
@@ -190,6 +196,10 @@ npm test
 # Run a subset, or run the cases against another build output
 node test/run.mjs --grep shadow
 node test/run.mjs --dist path/to/other/dist
+
+# Import any HTML file or Claude Design zip and print the node tree
+node test/run.mjs --html page.html --width 375
+node test/run.mjs --zip export.zip
 ```
 
 The runner loads the built `dist/ui.html` in a 400×580 frame (the real plugin size) and executes

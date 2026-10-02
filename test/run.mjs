@@ -12,6 +12,7 @@
  *   node test/run.mjs --grep br --dump  # 생성된 노드 트리를 요약 출력
  *   node test/run.mjs --html page.html --width 375   # 임의 HTML 파일을 가져와 트리만 출력
  *   node test/run.mjs --html page.html --autolayout  # Auto Layout 옵션을 켜고 가져오기
+ *   node test/run.mjs --zip export.zip              # Claude 디자인에서 내려받은 zip 을 끌어놓아 가져오기
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -62,17 +63,21 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
 const htmlFile = argOf('--html');
-const selected = htmlFile
+const zipFile = argOf('--zip');
+const printTree = (res) => {
+  console.log(res.roots.map((r) => summarize(r)).join('\n'));
+  console.log(`failed: ${res.done?.failedCount ?? '?'}${res.done?.firstError ? ` (${res.done.firstError})` : ''}`);
+};
+const selected = htmlFile || zipFile
   ? [{
-    id: path.basename(htmlFile),
-    title: '임의 HTML 가져오기',
+    id: path.basename(htmlFile || zipFile),
+    title: htmlFile ? '임의 HTML 가져오기' : 'Claude 디자인 zip 가져오기',
     width: Number(argOf('--width') || 1440),
     options: { autoLayout: args.includes('--autolayout') },
-    html: fs.readFileSync(htmlFile, 'utf8'),
-    check: (res) => {
-      console.log(res.roots.map((r) => summarize(r)).join('\n'));
-      console.log(`failed: ${res.done?.failedCount ?? '?'}${res.done?.firstError ? ` (${res.done.firstError})` : ''}`);
-    },
+    ...(htmlFile
+      ? { html: fs.readFileSync(htmlFile, 'utf8') }
+      : { file: { name: path.basename(zipFile), base64: fs.readFileSync(zipFile).toString('base64') } }),
+    check: printTree,
   }]
   : cases.filter((c) => !grep || c.id.includes(grep) || c.title.includes(grep));
 // 설치된 Chrome 을 우선 사용하고, 없으면 Playwright 브라우저(npx playwright install chromium)로 실행
@@ -99,11 +104,13 @@ for (const c of selected) {
   let error;
   let elapsed = 0;
   try {
-    const steps = c.sequence || (c.html ? [c] : []);
+    const steps = c.sequence || (c.html || c.file ? [c] : []);
     let res = { roots: [], selected: [] };
-    for (const { html, width, theme, options, selectFrame, failText, shortcut } of steps) {
+    for (const { html, file, expectError, width, theme, options, selectFrame, failText, shortcut } of steps) {
       const started = Date.now();
-      res = await page.evaluate((s) => window.runCase(s), { html: withBaseFont(html), width, theme, options, selectFrame, failText, shortcut });
+      res = await page.evaluate((s) => window.runCase(s), {
+        html: html === undefined ? undefined : withBaseFont(html), file, expectError, width, theme, options, selectFrame, failText, shortcut,
+      });
       res.elapsed = Date.now() - started;
       elapsed += res.elapsed;
     }
