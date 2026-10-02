@@ -21,15 +21,36 @@ export interface RenderedDocument {
 
 const LOAD_TIMEOUT_MS = 15000;
 
-/** fragment 는 문서로 감싸고, 문서는 표준 모드로 렌더링되도록 doctype 을 보장한다 */
+/**
+ * 붙여넣은 문서의 스크립트보다 먼저 실행해 저장소를 메모리 것으로 바꾼다.
+ * Figma 플러그인 창은 출처가 없는(null origin) 문서라 localStorage·sessionStorage·document.cookie 를 읽기만 해도
+ * SecurityError 가 난다. 시작하자마자 저장소를 읽는 스크립트(분석 도구 등)가 거기서 멈추면 그 뒤 화면이 그려지지 않는다.
+ * 브라우저에서도 붙여넣은 HTML 이 플러그인의 실제 저장소를 읽고 쓰지 않도록 항상 메모리 저장소를 쓴다.
+ */
+const STORAGE_SHIM = '<script>(function(){' +
+  'function mem(){var d=Object.create(null);return{get length(){return Object.keys(d).length},' +
+  'key:function(i){var k=Object.keys(d);return i>=0&&i<k.length?k[i]:null},' +
+  'getItem:function(k){k=String(k);return k in d?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},' +
+  'removeItem:function(k){delete d[String(k)]},clear:function(){d=Object.create(null)}}}' +
+  '["localStorage","sessionStorage"].forEach(function(n){try{Object.defineProperty(window,n,{configurable:true,enumerable:true,value:mem()})}catch(e){}});' +
+  'try{var c="";Object.defineProperty(document,"cookie",{configurable:true,get:function(){return c},' +
+  'set:function(v){var p=String(v).split(";")[0];if(p.indexOf("=")>0)c=c?c+"; "+p:p}})}catch(e){}' +
+  '})();</script>';
+
+/** fragment 는 문서로 감싸고, 문서는 표준 모드로 렌더링되도록 doctype 을 보장한다. 저장소 대체 스크립트를 맨 앞에 넣는다 */
 function toDocument(html: string): string {
   // 뷰포트 밖 lazy 이미지는 로드되지 않으므로 즉시 로드로 바꾼다
   let src = html.replace(/\bloading\s*=\s*(["'])lazy\1/gi, 'loading="eager"');
   if (!/<html[\s>]/i.test(src) && !/<body[\s>]/i.test(src)) {
-    src = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${src}</body></html>`;
-  } else if (!/^\s*<!doctype/i.test(src)) {
-    src = `<!DOCTYPE html>${src}`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">${STORAGE_SHIM}</head><body>${src}</body></html>`;
   }
+  if (/<head[\s>]/i.test(src)) src = src.replace(/<head\b[^>]*>/i, (tag) => tag + STORAGE_SHIM);
+  else if (/<html[\s>]/i.test(src)) src = src.replace(/<html\b[^>]*>/i, (tag) => tag + STORAGE_SHIM);
+  else {
+    const doctype = /^\s*<!doctype[^>]*>/i.exec(src);
+    src = doctype ? doctype[0] + STORAGE_SHIM + src.slice(doctype[0].length) : STORAGE_SHIM + src;
+  }
+  if (!/^\s*<!doctype/i.test(src)) src = `<!DOCTYPE html>${src}`;
   return src;
 }
 

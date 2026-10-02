@@ -65,8 +65,24 @@
     }
   }
 
+  // Figma 플러그인 창(출처 없는 문서)처럼 저장소를 읽으면 SecurityError 가 나게 하는 스크립트 — doctype 바로 뒤에 넣는다
+  const BLOCK_STORAGE = '<script>(function(){function no(n){return function(){throw new DOMException("Failed to read the \'"+n+"\' property: The document is sandboxed and lacks the \'allow-same-origin\' flag.","SecurityError")}}' +
+    '["localStorage","sessionStorage"].forEach(function(n){Object.defineProperty(window,n,{configurable:true,get:no(n)})});' +
+    'Object.defineProperty(document,"cookie",{configurable:true,get:no("cookie"),set:no("cookie")});})();<\/script>';
+  function blockStorageInRenders(win) {
+    const proto = win.HTMLIFrameElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'srcdoc');
+    Object.defineProperty(proto, 'srcdoc', {
+      configurable: true,
+      get() { return desc.get.call(this); },
+      set(v) { desc.set.call(this, String(v).replace(/^(\s*<!doctype[^>]*>)?/i, (m) => m + BLOCK_STORAGE)); },
+    });
+    return () => Object.defineProperty(proto, 'srcdoc', desc);
+  }
+
   /**
-   * @param c { html | file: { name, base64 }, width, theme, options: { autoLayout, intoSelection }, selectFrame, expectError }
+   * @param c { html | file: { name, base64 }, width, theme, options: { autoLayout, intoSelection }, selectFrame, expectError,
+   *            uiStorage: 플러그인 창의 실제 저장소에 미리 넣을 값, blockStorage: 렌더 문서의 저장소 접근을 막는다 }
    * @returns { roots, done, error }
    */
   window.runCase = async function (c) {
@@ -95,6 +111,11 @@
       await sleep(30);
     }
     setValue(win, doc.querySelector('select'), String(c.width || 1440));
+    if (c.uiStorage) {
+      win.localStorage.setItem('importer-probe', c.uiStorage);
+      win.document.cookie = `importerprobe=${c.uiStorage}; path=/`;
+    }
+    const unblock = c.blockStorage ? blockStorageInRenders(win) : null;
     if (c.file) await dropBytes(c.file.name, c.file.base64);
     else setValue(win, doc.querySelector('textarea'), c.html);
     if (c.file && c.expectError && doc.querySelector('.error-box')) {
@@ -133,6 +154,11 @@
     } finally {
       finished = true;
       waiter = null;
+      if (unblock) unblock();
+      if (c.uiStorage) {
+        win.localStorage.removeItem('importer-probe');
+        win.document.cookie = 'importerprobe=; path=/; max-age=0';
+      }
     }
     if (done && done.uiError !== undefined) {
       window.__failText = null;

@@ -86,6 +86,12 @@ const DESIGN_ZIP_MULTI = await makeZipBase64({
   ...exportFiles('export/'),
 }, { deflate: true });
 const DESIGN_ZIP_EMPTY = await makeZipBase64({ 'README.md': '# 화면 없음' });
+// 실제 디자인 시스템 번들처럼 불러오자마자 저장소를 읽는 번들 (분석 도구 초기화 흉내)
+const DESIGN_ZIP_STORAGE = await makeZipBase64({
+  'Main.dc.html': MAIN_BOARD,
+  ...exportFiles(),
+  'ds/demo/components/bundle.js': `var savedBuilding = window.localStorage.getItem('gaBuildingName');\n${FAKE_BUNDLE_JS}`,
+});
 // 자원을 이미 본문에 넣은 캔버스 화면 (런타임이 늦게 그려도 기다려야 한다)
 const MAIN_BOARD_INLINED = MAIN_BOARD
   .replace('<script src="./vendor/react.js"></script>', `<script>${FAKE_REACT}</script>`)
@@ -1611,6 +1617,32 @@ export const cases = [
       t.ok(findText(root, '런타임 배지'), `runtime component: ${JSON.stringify(texts(root).map((x) => x.characters))}`);
       t.ok(findText(root, '정적 제목'), 'static text');
     },
+  },
+  {
+    id: 'design-zip-storage-blocked',
+    title: 'Figma 플러그인 창처럼 저장소 접근이 막혀도 불러오자마자 저장소를 읽는 번들이 멈추지 않고 컴포넌트가 그려진다',
+    blockStorage: true,
+    file: { name: 'storage.zip', base64: DESIGN_ZIP_STORAGE },
+    check: ({ root, done }, t) => {
+      t.ok(findText(root, '런타임 배지'), `runtime component: ${JSON.stringify(texts(root).map((x) => x.characters))}`);
+      t.eq(done?.failedCount, 0, 'no failures');
+    },
+  },
+  {
+    id: 'storage-blocked-script',
+    title: '저장소·쿠키 접근이 막힌 곳에서도 붙여넣은 스크립트가 끝까지 실행된다',
+    width: 375,
+    blockStorage: true,
+    html: '<div id="out"></div><script>localStorage.setItem("k", "v"); sessionStorage.setItem("s", "1"); document.cookie = "a=1"; document.getElementById("out").textContent = "끝까지 " + localStorage.getItem("k") + sessionStorage.getItem("s") + document.cookie;</script>',
+    check: ({ root }, t) => t.ok(findText(root, '끝까지 v1a=1'), `texts: ${JSON.stringify(texts(root).map((x) => x.characters))}`),
+  },
+  {
+    id: 'storage-isolated',
+    title: '붙여넣은 HTML 은 플러그인의 실제 저장소·쿠키를 읽지 않는다',
+    width: 375,
+    uiStorage: 'real',
+    html: '<div id="out"></div><script>document.getElementById("out").textContent = "probe " + localStorage.getItem("importer-probe") + " cookie[" + document.cookie + "]";</script>',
+    check: ({ root }, t) => t.ok(findText(root, 'probe null cookie[]'), `texts: ${JSON.stringify(texts(root).map((x) => x.characters))}`),
   },
   {
     id: 'dom-order-without-overlap',

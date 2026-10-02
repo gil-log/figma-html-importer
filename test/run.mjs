@@ -13,6 +13,7 @@
  *   node test/run.mjs --html page.html --width 375   # 임의 HTML 파일을 가져와 트리만 출력
  *   node test/run.mjs --html page.html --autolayout  # Auto Layout 옵션을 켜고 가져오기
  *   node test/run.mjs --zip export.zip              # Claude 디자인에서 내려받은 zip 을 끌어놓아 가져오기
+ *   node test/run.mjs --zip export.zip --figma      # Figma 플러그인 창처럼 저장소 접근이 막힌 상태로 가져오기
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -74,6 +75,8 @@ const selected = htmlFile || zipFile
     title: htmlFile ? '임의 HTML 가져오기' : 'Claude 디자인 zip 가져오기',
     width: Number(argOf('--width') || 1440),
     options: { autoLayout: args.includes('--autolayout') },
+    // --figma: Figma 플러그인 창처럼 렌더 문서의 저장소 접근을 막는다
+    blockStorage: args.includes('--figma'),
     ...(htmlFile
       ? { html: fs.readFileSync(htmlFile, 'utf8') }
       : { file: { name: path.basename(zipFile), base64: fs.readFileSync(zipFile).toString('base64') } }),
@@ -106,10 +109,11 @@ for (const c of selected) {
   try {
     const steps = c.sequence || (c.html || c.file ? [c] : []);
     let res = { roots: [], selected: [] };
-    for (const { html, file, expectError, width, theme, options, selectFrame, failText, shortcut } of steps) {
+    for (const { html, file, expectError, uiStorage, blockStorage, width, theme, options, selectFrame, failText, shortcut } of steps) {
       const started = Date.now();
       res = await page.evaluate((s) => window.runCase(s), {
-        html: html === undefined ? undefined : withBaseFont(html), file, expectError, width, theme, options, selectFrame, failText, shortcut,
+        html: html === undefined ? undefined : withBaseFont(html), file, expectError, uiStorage, blockStorage,
+        width, theme, options, selectFrame, failText, shortcut,
       });
       res.elapsed = Date.now() - started;
       elapsed += res.elapsed;

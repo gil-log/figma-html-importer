@@ -18,6 +18,10 @@ text nodes, and vectors.
   and nothing leaks between imports. Scripts that throw or call `alert()` cannot break the plugin.
 - **External resources** — `<link>` stylesheets, web fonts (Google Fonts, `@font-face`), and
   scripts from any CDN load before capture, and text is measured after the web fonts finish loading.
+- **In-memory storage** — the rendered page gets its own in-memory `localStorage`, `sessionStorage`,
+  and `document.cookie`. Figma's plugin window has no origin, so reading real storage throws a
+  `SecurityError`; scripts that touch storage on load (analytics setup, saved settings) keep
+  running instead of stopping halfway, and pasted HTML never sees the plugin's own storage.
 - **Tailwind CSS support** — the Tailwind Play CDN script in your HTML works as-is, including
   `tailwind.config = {...}` and `<style type="text/tailwindcss">` with `@apply`.
 - **Responsive viewport** — choose from 6 presets (375×812 Mobile through 3840×2160 Extra Wide).
@@ -200,6 +204,9 @@ node test/run.mjs --dist path/to/other/dist
 # Import any HTML file or Claude Design zip and print the node tree
 node test/run.mjs --html page.html --width 375
 node test/run.mjs --zip export.zip
+
+# Same, with storage access blocked as in Figma's plugin window
+node test/run.mjs --zip export.zip --figma
 ```
 
 The runner loads the built `dist/ui.html` in a 400×580 frame (the real plugin size) and executes

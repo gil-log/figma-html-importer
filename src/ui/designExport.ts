@@ -139,7 +139,7 @@ export function readDesignExport(files: Map<string, Uint8Array>): DesignArtboard
     const boot = `<script>(function(){var R={},B={},S=${escapeScript(JSON.stringify(siblings))};` +
       `Object.keys(S).forEach(function(k,i){var id='dc-sibling-'+i;R[k]=id;B[id]=new Blob([S[k]],{type:'text/html'});});` +
       `window.__resources=R;window.__resourceBlobs=B;})();</script>`;
-    html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + boot) : boot + html;
+    html = /<head\b[^>]*>/i.test(html) ? html.replace(/<head\b[^>]*>/i, (h) => h + boot) : boot + html;
 
     const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text(board))?.[1].trim() ?? '';
     const name = board.slice(board.lastIndexOf('/') + 1).replace(/\.dc\.html?$/i, '');
